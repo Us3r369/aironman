@@ -390,6 +390,52 @@ def extract_fit_from_zip(zip_path: Path, activity_name: str, activity_id: str,
     return None
 
 
+def extract_workout_targets_from_fit(fit_file_path: Path) -> Dict[str, Any]:
+    """
+    Extract target heartrate zone, pace, and power from FIT file's workout_step and session messages.
+    Args:
+        fit_file_path (Path): Path to FIT file
+    Returns:
+        Dict[str, Any]: Dictionary with target info per step or session, e.g. {"workout_steps": [...], "session_targets": {...}}
+    """
+    target_info = {
+        "workout_steps": [],  # List of dicts per step
+        "session_targets": {},
+    }
+    try:
+        fitfile = FitFile(str(fit_file_path))
+        # Extract workout_step targets
+        for step in fitfile.get_messages("workout_step"):
+            step_data = {f.name: f.value for f in step.fields}
+            # Only include if target_type is set
+            if step_data.get("target_type") is not None:
+                target_entry = {
+                    "message_index": step_data.get("message_index"),
+                    "wkt_step_name": step_data.get("wkt_step_name"),
+                    "duration_type": step_data.get("duration_type"),
+                    "duration_value": step_data.get("duration_value"),
+                    "target_type": step_data.get("target_type"),
+                    "target_value": step_data.get("target_value"),
+                    "custom_target_value_low": step_data.get("custom_target_value_low"),
+                    "custom_target_value_high": step_data.get("custom_target_value_high"),
+                    "intensity": step_data.get("intensity"),
+                }
+                target_info["workout_steps"].append(target_entry)
+        # Extract session-level targets (if any)
+        for session in fitfile.get_messages("session"):
+            session_data = {f.name: f.value for f in session.fields}
+            # Only include relevant target fields
+            for key in [
+                "avg_heart_rate", "avg_power", "threshold_power", "avg_speed",
+                "total_distance", "total_timer_time", "sport", "sub_sport"
+            ]:
+                if key in session_data:
+                    target_info["session_targets"][key] = session_data[key]
+    except Exception as e:
+        logger.error(f"Failed to extract workout targets from FIT: {e}")
+    return target_info
+
+
 def process_activity_files(tcx_path: Path, workout_dir: Path) -> Optional[Dict[str, Any]]:
     """
     Process activity files for a single workout.
@@ -420,12 +466,15 @@ def process_activity_files(tcx_path: Path, workout_dir: Path) -> Optional[Dict[s
                 workout_type = gpx_type
 
     # Extract FIT and power data if available
+    fit_targets = None
     if zip_path.exists():
         fit_file_path = extract_fit_from_zip(zip_path, safe_name, activity_id, workout_dir)
         if fit_file_path:
             power_series = extract_power_time_series_from_fit(fit_file_path)
             if power_series:
                 save_json_data(power_series, power_json_file)
+            # Extract workout targets for bike/run
+            fit_targets = extract_workout_targets_from_fit(fit_file_path)
             # Clean up FIT file
             try:
                 fit_file_path.unlink()
@@ -462,6 +511,9 @@ def process_activity_files(tcx_path: Path, workout_dir: Path) -> Optional[Dict[s
             "data": merged if merged is not None else trackpoints,
             "csv_file": str(csv_file) if csv_file.exists() else None
         }
+        # Add target_info for bike/run if available (from FIT workout structure)
+        if workout_type in ("bike", "run") and fit_targets:
+            processed_data["target_info"] = fit_targets
         return processed_data
     except Exception as e:
         logger.error(f"Failed to process activity files for {tcx_path}: {e}")
