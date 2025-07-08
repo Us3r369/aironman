@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+sqlalchemy
+psycopg2-binary
+numpy
+pandas
+garminconnect
+crewai
+crewai[tools]
+langchain-openai
+fitdecode
+fitparse
+pydantic-settings

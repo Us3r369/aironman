@@ -92,3 +92,5 @@ docker-compose.override.yml
 # Ignore reference and dev task files
 reference_files/
 ai-dev-tasks/ 
+
+node_modules/
