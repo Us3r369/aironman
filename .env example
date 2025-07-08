@@ -1,0 +1,11 @@
+# Example .env file for AIronman Coaching App
+GARMIN_EMAIL=your_garmin_email@example.com
+GARMIN_PASSWORD=your_garmin_password
+# Optional: GARMINTOKENS=/app/.garmin_tokens
+POSTGRES_DB=aironman_db
+POSTGRES_USER=user
+POSTGRES_PASSWORD=password
+POSTGRES_HOST=db
+POSTGRES_PORT=5432
+# OpenAI API Configuration
+OPENAI_API_KEY=example_api_key
