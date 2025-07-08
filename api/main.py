@@ -495,14 +495,12 @@ class WorkoutSummary(BaseModel):
     timestamp: str
     workout_type: str
     tss: Optional[float] = None
-    duration_sec: Optional[int] = None
-    duration_hr: Optional[float] = None
-    # Add more fields as needed for the frontend
+    synced_at: Optional[str] = None
+    # json_file is not included in summary, but can be added if needed
 
 class WorkoutDetail(WorkoutSummary):
     json_file: Optional[dict] = None
     csv_file: Optional[str] = None
-    synced_at: Optional[str] = None
 
 @app.get("/api/workouts", response_model=List[WorkoutSummary])
 def get_workouts(
@@ -528,7 +526,7 @@ def get_workouts(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT id, athlete_id, timestamp, workout_type, tss, duration_sec, duration_hr, json_file, csv_file, synced_at
+                SELECT id, athlete_id, timestamp, workout_type, tss, synced_at
                 FROM workout
                 WHERE athlete_id = %s AND timestamp::date BETWEEN %s AND %s
                 ORDER BY timestamp ASC
@@ -544,8 +542,7 @@ def get_workouts(
                     timestamp=row[2].isoformat() if hasattr(row[2], 'isoformat') else str(row[2]),
                     workout_type=row[3],
                     tss=row[4],
-                    duration_sec=row[5],
-                    duration_hr=row[6],
+                    synced_at=row[5],
                 ))
             return result
 
@@ -556,7 +553,7 @@ def get_workout_detail(workout_id: str):
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT id, athlete_id, timestamp, workout_type, tss, duration_sec, duration_hr, json_file, csv_file, synced_at
+                SELECT id, athlete_id, timestamp, workout_type, tss, json_file, csv_file, synced_at
                 FROM workout
                 WHERE id = %s
                 """,
@@ -565,15 +562,20 @@ def get_workout_detail(workout_id: str):
             row = cur.fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Workout not found")
+            # Parse json_file if it's a string
+            json_data = row[5]
+            if isinstance(json_data, str):
+                try:
+                    json_data = json.loads(json_data)
+                except Exception:
+                    json_data = None
             return WorkoutDetail(
                 id=row[0],
                 athlete_id=row[1],
                 timestamp=row[2].isoformat() if hasattr(row[2], 'isoformat') else str(row[2]),
                 workout_type=row[3],
                 tss=row[4],
-                duration_sec=row[5],
-                duration_hr=row[6],
-                json_file=row[7],
-                csv_file=row[8],
-                synced_at=row[9],
+                json_file=json_data,
+                csv_file=row[6],
+                synced_at=row[7],
             )
