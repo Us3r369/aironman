@@ -94,3 +94,5 @@ reference_files/
 ai-dev-tasks/ 
 
 node_modules/
+
+data/
