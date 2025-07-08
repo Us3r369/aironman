@@ -1,0 +1,16 @@
+{
+  "userProfileId": 96589413,
+  "statisticsStartDate": "2025-07-07",
+  "statisticsEndDate": "2025-07-07",
+  "allMetrics": {
+    "metricsMap": {
+      "WELLNESS_RESTING_HEART_RATE": [
+        {
+          "value": 38.0,
+          "calendarDate": "2025-07-07"
+        }
+      ]
+    }
+  },
+  "groupedMetrics": null
+}

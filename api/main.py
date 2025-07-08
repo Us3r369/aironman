@@ -1,8 +1,8 @@
-from fastapi import FastAPI, BackgroundTasks, HTTPException, Request
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Union
 import threading
 import time
 import psycopg2
@@ -19,7 +19,7 @@ from utils.exceptions import (
     AIronmanException, DatabaseException, ProfileNotFoundException, 
     ProfileValidationException, SyncException, ValidationException
 )
-from utils.database import get_db_conn
+from utils.database import get_db_conn, get_athlete_uuid
 
 # Setup logging
 setup_logging(log_level="INFO", log_file="logs/app.log")
@@ -488,3 +488,92 @@ def update_profile(profile: AthleteProfile):
                 if isinstance(e, ValidationException):
                     raise
                 raise DatabaseException(f"Failed to update profile: {e}")
+
+class WorkoutSummary(BaseModel):
+    id: str
+    athlete_id: str
+    timestamp: str
+    workout_type: str
+    tss: Optional[float] = None
+    duration_sec: Optional[int] = None
+    duration_hr: Optional[float] = None
+    # Add more fields as needed for the frontend
+
+class WorkoutDetail(WorkoutSummary):
+    json_file: Optional[dict] = None
+    csv_file: Optional[str] = None
+    synced_at: Optional[str] = None
+
+@app.get("/api/workouts", response_model=List[WorkoutSummary])
+def get_workouts(
+    athlete_id: str = Query(..., description="Athlete UUID or name"),
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)")
+):
+    """Get workouts for an athlete in a date range (default: current week)."""
+    try:
+        athlete_uuid = get_athlete_uuid(athlete_id)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Athlete not found: {e}")
+
+    today = dt.date.today()
+    if not start_date:
+        # Default to start of current week (Monday)
+        start_date = (today - dt.timedelta(days=today.weekday())).isoformat()
+    if not end_date:
+        # Default to end of current week (Sunday)
+        end_date = (today + dt.timedelta(days=6-today.weekday())).isoformat()
+
+    with get_db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, athlete_id, timestamp, workout_type, tss, duration_sec, duration_hr, json_file, csv_file, synced_at
+                FROM workout
+                WHERE athlete_id = %s AND timestamp::date BETWEEN %s AND %s
+                ORDER BY timestamp ASC
+                """,
+                (athlete_uuid, start_date, end_date)
+            )
+            rows = cur.fetchall()
+            result = []
+            for row in rows:
+                result.append(WorkoutSummary(
+                    id=row[0],
+                    athlete_id=row[1],
+                    timestamp=row[2].isoformat() if hasattr(row[2], 'isoformat') else str(row[2]),
+                    workout_type=row[3],
+                    tss=row[4],
+                    duration_sec=row[5],
+                    duration_hr=row[6],
+                ))
+            return result
+
+@app.get("/api/workouts/{workout_id}", response_model=WorkoutDetail)
+def get_workout_detail(workout_id: str):
+    """Get detailed information for a specific workout."""
+    with get_db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, athlete_id, timestamp, workout_type, tss, duration_sec, duration_hr, json_file, csv_file, synced_at
+                FROM workout
+                WHERE id = %s
+                """,
+                (workout_id,)
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Workout not found")
+            return WorkoutDetail(
+                id=row[0],
+                athlete_id=row[1],
+                timestamp=row[2].isoformat() if hasattr(row[2], 'isoformat') else str(row[2]),
+                workout_type=row[3],
+                tss=row[4],
+                duration_sec=row[5],
+                duration_hr=row[6],
+                json_file=row[7],
+                csv_file=row[8],
+                synced_at=row[9],
+            )

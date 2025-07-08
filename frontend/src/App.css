@@ -492,4 +492,124 @@
 
 body.modal-open {
   overflow: hidden;
+}
+
+/* Workouts calendar styles */
+.workouts-container {
+  padding: 24px;
+}
+.calendar-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 24px;
+}
+.calendar-table th, .calendar-table td {
+  border: 1px solid #ddd;
+  padding: 8px;
+  text-align: center;
+  min-width: 120px;
+  vertical-align: top;
+}
+.calendar-table th {
+  background: #f0f0f0;
+  font-weight: 600;
+}
+.calendar-cell {
+  min-height: 60px;
+}
+.workout-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.workout-item {
+  background: #e6f7ff;
+  margin: 4px 0;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  transition: background 0.2s;
+}
+.workout-item:hover {
+  background: #bae7ff;
+}
+.workout-type {
+  font-weight: 600;
+  margin-right: 8px;
+}
+.workout-tss, .workout-duration {
+  font-size: 0.9em;
+  color: #555;
+  margin-right: 8px;
+}
+.no-workout {
+  color: #bbb;
+}
+
+/* Modal styles */
+.workout-modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.3);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.workout-modal {
+  background: #fff;
+  padding: 32px 24px 24px 24px;
+  border-radius: 8px;
+  min-width: 350px;
+  max-width: 90vw;
+  max-height: 90vh;
+  overflow-y: auto;
+  position: relative;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.15);
+}
+.close-btn {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  background: none;
+  border: none;
+  font-size: 2em;
+  color: #888;
+  cursor: pointer;
+}
+.workout-table-container {
+  margin-top: 16px;
+}
+.workout-detail-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95em;
+}
+.workout-detail-table th, .workout-detail-table td {
+  border: 1px solid #eee;
+  padding: 4px 6px;
+  text-align: right;
+}
+.workout-detail-table th {
+  background: #fafafa;
+  font-weight: 600;
+}
+.workout-plot-container {
+  margin-top: 18px;
+  margin-bottom: 8px;
+}
+.loading-spinner {
+  color: #0074d9;
+  font-weight: 600;
+  margin: 16px 0;
+}
+.error-message {
+  color: #d8000c;
+  background: #ffd2d2;
+  padding: 12px;
+  border-radius: 6px;
+  margin: 12px 0;
 } 
