@@ -393,17 +393,22 @@ def extract_fit_from_zip(zip_path: Path, activity_name: str, activity_id: str,
 def extract_workout_targets_from_fit(fit_file_path: Path) -> Dict[str, Any]:
     """
     Extract target heartrate zone, pace, and power from FIT file's workout_step and session messages.
+    Also extracts step_index from record messages to map targets to timestamps.
+    
     Args:
         fit_file_path (Path): Path to FIT file
     Returns:
-        Dict[str, Any]: Dictionary with target info per step or session, e.g. {"workout_steps": [...], "session_targets": {...}}
+        Dict[str, Any]: Dictionary with target info per step, session targets, and step timing info
     """
     target_info = {
         "workout_steps": [],  # List of dicts per step
         "session_targets": {},
+        "step_timing": {},  # Maps step_index to timing info
     }
+    
     try:
         fitfile = FitFile(str(fit_file_path))
+        
         # Extract workout_step targets
         for step in fitfile.get_messages("workout_step"):
             step_data = {f.name: f.value for f in step.fields}
@@ -421,6 +426,7 @@ def extract_workout_targets_from_fit(fit_file_path: Path) -> Dict[str, Any]:
                     "intensity": step_data.get("intensity"),
                 }
                 target_info["workout_steps"].append(target_entry)
+        
         # Extract session-level targets (if any)
         for session in fitfile.get_messages("session"):
             session_data = {f.name: f.value for f in session.fields}
@@ -431,9 +437,202 @@ def extract_workout_targets_from_fit(fit_file_path: Path) -> Dict[str, Any]:
             ]:
                 if key in session_data:
                     target_info["session_targets"][key] = session_data[key]
+        
+        # Extract step_index from record messages to map targets to timestamps
+        step_timing = {}
+        current_step = 0
+        step_start_time = None
+        
+        for record in fitfile.get_messages("record"):
+            fields = {f.name: f.value for f in record.fields}
+            timestamp = fields.get("timestamp")
+            step_index = fields.get("step_index")
+            
+            if timestamp is not None and step_index is not None:
+                if step_index != current_step:
+                    # New step started
+                    if step_start_time is not None:
+                        # Store timing info for previous step
+                        step_timing[current_step] = {
+                            "start_time": step_start_time,
+                            "end_time": timestamp,
+                            "duration_sec": (timestamp - step_start_time).total_seconds() if hasattr(timestamp, '__sub__') else None
+                        }
+                    current_step = step_index
+                    step_start_time = timestamp
+        
+        # Store timing for the last step
+        if step_start_time is not None:
+            step_timing[current_step] = {
+                "start_time": step_start_time,
+                "end_time": None,  # Will be filled when we have the workout end time
+                "duration_sec": None
+            }
+        
+        target_info["step_timing"] = step_timing
+        
     except Exception as e:
         logger.error(f"Failed to extract workout targets from FIT: {e}")
+    
     return target_info
+
+
+def map_targets_to_timestamps(trackpoints: List[Dict[str, Any]], 
+                            target_info: Dict[str, Any], 
+                            workout_type: str) -> List[Dict[str, Any]]:
+    """
+    Map target information to specific timestamps based on workout step timing.
+    
+    Args:
+        trackpoints: List of trackpoint data with timestamps
+        target_info: Target information from FIT file
+        workout_type: Type of workout (bike, run, swim)
+    
+    Returns:
+        List of trackpoints with target information added
+    """
+    if not target_info or not target_info.get("workout_steps"):
+        return trackpoints
+    
+    # Create step lookup by message_index
+    step_lookup = {}
+    for step in target_info["workout_steps"]:
+        step_lookup[step["message_index"]] = step
+    
+    # Create timing lookup
+    timing_lookup = target_info.get("step_timing", {})
+    
+    # Find workout start time from first trackpoint
+    if not trackpoints:
+        return trackpoints
+    
+    try:
+        workout_start = dtparser.parse(trackpoints[0]["timestamp"])
+    except Exception:
+        logger.warning("Could not parse workout start time, skipping target mapping")
+        return trackpoints
+    
+    # Map targets to trackpoints
+    enhanced_trackpoints = []
+    current_step = 0
+    
+    for i, trackpoint in enumerate(trackpoints):
+        try:
+            tp_time = dtparser.parse(trackpoint["timestamp"])
+            elapsed_sec = (tp_time - workout_start).total_seconds()
+            
+            # Find which step this timestamp belongs to
+            step_found = False
+            cumulative_time = 0
+            
+            for step_idx, step in enumerate(target_info["workout_steps"]):
+                duration_value = step.get("duration_value")
+                duration_type = step.get("duration_type")
+                
+                if duration_value is not None and duration_type == "time":
+                    # Convert duration to seconds (assuming it's in milliseconds)
+                    step_duration_sec = duration_value / 1000.0
+                    
+                    if cumulative_time <= elapsed_sec < cumulative_time + step_duration_sec:
+                        current_step = step_idx
+                        step_found = True
+                        break
+                    
+                    cumulative_time += step_duration_sec
+                elif duration_type == "open":
+                    # Open duration step - apply to remaining time
+                    if elapsed_sec >= cumulative_time:
+                        current_step = step_idx
+                        step_found = True
+                        break
+            
+            # Add target information to trackpoint
+            enhanced_tp = dict(trackpoint)
+            
+            if step_found and current_step < len(target_info["workout_steps"]):
+                step = target_info["workout_steps"][current_step]
+                
+                # Add target information based on workout type
+                if workout_type == "bike":
+                    if step.get("target_type") == "power_3s" or step.get("target_type") == 0:  # custom range
+                        enhanced_tp["target_power_low"] = step.get("custom_target_value_low")
+                        enhanced_tp["target_power_high"] = step.get("custom_target_value_high")
+                        enhanced_tp["target_power_type"] = step.get("target_type")
+                    elif step.get("target_type") == 4:  # zone
+                        enhanced_tp["target_power_zone"] = step.get("target_value")
+                        enhanced_tp["target_power_type"] = "zone"
+                
+                elif workout_type == "run":
+                    if step.get("target_type") == "speed" or step.get("target_type") == 0:  # custom range
+                        # Convert speed from m/s*1000 to m/s and then to pace
+                        speed_low = step.get("custom_target_value_low")
+                        speed_high = step.get("custom_target_value_high")
+                        
+                        if speed_low is not None:
+                            speed_low_mps = speed_low / 1000.0
+                            enhanced_tp["target_pace_high"] = 1000.0 / speed_low_mps if speed_low_mps > 0 else None  # s/km
+                        
+                        if speed_high is not None:
+                            speed_high_mps = speed_high / 1000.0
+                            enhanced_tp["target_pace_low"] = 1000.0 / speed_high_mps if speed_high_mps > 0 else None  # s/km
+                        
+                        enhanced_tp["target_speed_low"] = speed_low
+                        enhanced_tp["target_speed_high"] = speed_high
+                        enhanced_tp["target_speed_type"] = step.get("target_type")
+                
+                # Add step information
+                enhanced_tp["workout_step_index"] = current_step
+                enhanced_tp["workout_step_name"] = step.get("wkt_step_name")
+                enhanced_tp["workout_intensity"] = step.get("intensity")
+            
+            enhanced_trackpoints.append(enhanced_tp)
+            
+        except Exception as e:
+            logger.warning(f"Error processing trackpoint {i}: {e}")
+            enhanced_trackpoints.append(trackpoint)
+    
+    return enhanced_trackpoints
+
+
+def extract_swim_targets_from_step_name(step_name: str) -> Dict[str, Any]:
+    """
+    Extract swim pace targets from step name using regex.
+    Expected format: "Pace 2:26–2:43/100 yards"
+    
+    Args:
+        step_name: Step name string from FIT file
+        
+    Returns:
+        Dictionary with extracted pace targets
+    """
+    import re
+    
+    if not step_name:
+        return {}
+    
+    # Regex to match pace format: "Pace 2:26–2:43/100 yards"
+    pattern = r"Pace\s+(\d+:\d+)–(\d+:\d+)/(\d+)\s+(yards|meters)"
+    match = re.search(pattern, step_name)
+    
+    if match:
+        pace_low_str, pace_high_str, distance, unit = match.groups()
+        
+        # Convert pace strings to seconds
+        def pace_to_seconds(pace_str):
+            minutes, seconds = map(int, pace_str.split(':'))
+            return minutes * 60 + seconds
+        
+        pace_low_sec = pace_to_seconds(pace_low_str)
+        pace_high_sec = pace_to_seconds(pace_high_str)
+        
+        return {
+            "target_pace_low": pace_low_sec,
+            "target_pace_high": pace_high_sec,
+            "target_distance": int(distance),
+            "target_unit": unit
+        }
+    
+    return {}
 
 
 def process_activity_files(tcx_path: Path, workout_dir: Path) -> Optional[Dict[str, Any]]:
@@ -511,9 +710,18 @@ def process_activity_files(tcx_path: Path, workout_dir: Path) -> Optional[Dict[s
             "data": merged if merged is not None else trackpoints,
             "csv_file": str(csv_file) if csv_file.exists() else None
         }
-        # Add target_info for bike/run if available (from FIT workout structure)
-        if workout_type in ("bike", "run") and fit_targets:
+        
+        # Add target information to trackpoints for bike/run/swim if available
+        if fit_targets and workout_type in ("bike", "run", "swim"):
+            # Map targets to timestamps
+            enhanced_data = map_targets_to_timestamps(
+                processed_data["data"], 
+                fit_targets, 
+                workout_type
+            )
+            processed_data["data"] = enhanced_data
             processed_data["target_info"] = fit_targets
+        
         return processed_data
     except Exception as e:
         logger.error(f"Failed to process activity files for {tcx_path}: {e}")
