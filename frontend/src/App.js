@@ -554,7 +554,6 @@ function WorkoutsView() {
                           <li key={w.id} className="workout-item" onClick={() => setSelectedWorkout(w.id)}>
                             <span className="workout-type">{w.workout_type}</span>
                             {w.tss !== null && <span className="workout-tss">TSS: {w.tss}</span>}
-                            {w.duration_hr !== null && <span className="workout-duration">{w.duration_hr.toFixed(2)}h</span>}
                           </li>
                         ))}
                       </ul>
@@ -581,7 +580,6 @@ function WorkoutsView() {
                 <div><b>Type:</b> {workoutDetail.workout_type}</div>
                 <div><b>Date:</b> {workoutDetail.timestamp}</div>
                 <div><b>TSS:</b> {workoutDetail.tss}</div>
-                <div><b>Duration:</b> {workoutDetail.duration_hr ? workoutDetail.duration_hr.toFixed(2) + 'h' : '-'}</div>
                 {/* Tabular data from json_file if available */}
                 {workoutDetail.json_file && workoutDetail.json_file.data && Array.isArray(workoutDetail.json_file.data) && (
                   <div className="workout-table-container">
@@ -610,6 +608,15 @@ function WorkoutsView() {
                 {/* Optionally, add a simple plot (e.g., time vs. heart_rate or power) */}
                 {workoutDetail.json_file && workoutDetail.json_file.data && Array.isArray(workoutDetail.json_file.data) && (
                   <SimpleWorkoutPlot data={workoutDetail.json_file.data} />
+                )}
+                {/* Pretty-printed JSON for the full json_file */}
+                {workoutDetail.json_file && (
+                  <div className="json-file-block">
+                    <h4>Raw JSON</h4>
+                    <pre style={{ maxHeight: 300, overflow: 'auto', background: '#f8f8f8', border: '1px solid #ccc', padding: 8 }}>
+                      {JSON.stringify(workoutDetail.json_file, null, 2)}
+                    </pre>
+                  </div>
                 )}
               </div>
             ) : null}

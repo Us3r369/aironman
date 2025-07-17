@@ -282,24 +282,16 @@ def get_profile():
                 row = cur.fetchone()
                 if not row:
                     raise ProfileNotFoundException("Profile not found")
-                print(f"test_dates raw: bike_ftp_test={row[78]} ({type(row[78])}), run_ltp_test={row[79]} ({type(row[79])}), swim_css_test={row[80]} ({type(row[80])})")
                 def to_str(val):
-                    print(f"Converting value: {val} ({type(val)})")
                     if isinstance(val, dt.date):
                         return val.strftime('%Y-%m-%d')
                     elif val is not None:
                         return str(val)
                     return None
-                # Force conversion of test_dates fields to string
-                bike_ftp_test = row[78]
-                run_ltp_test = row[79]
-                swim_css_test = row[80]
-                if isinstance(bike_ftp_test, dt.date):
-                    bike_ftp_test = bike_ftp_test.strftime('%Y-%m-%d')
-                if isinstance(run_ltp_test, dt.date):
-                    run_ltp_test = run_ltp_test.strftime('%Y-%m-%d')
-                if isinstance(swim_css_test, dt.date):
-                    swim_css_test = swim_css_test.strftime('%Y-%m-%d')
+                # Always convert test_dates fields to string
+                bike_ftp_test = to_str(row[78])
+                run_ltp_test = to_str(row[79])
+                swim_css_test = to_str(row[80])
                 profile = {
                     "athlete_id": row[0],
                     "last_updated": to_str(row[1]),
@@ -528,7 +520,7 @@ def get_workouts(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT id, athlete_id, timestamp, workout_type, tss, duration_sec, duration_hr, json_file, csv_file, synced_at
+                SELECT id, athlete_id, timestamp, workout_type, tss
                 FROM workout
                 WHERE athlete_id = %s AND timestamp::date BETWEEN %s AND %s
                 ORDER BY timestamp ASC
@@ -544,8 +536,6 @@ def get_workouts(
                     timestamp=row[2].isoformat() if hasattr(row[2], 'isoformat') else str(row[2]),
                     workout_type=row[3],
                     tss=row[4],
-                    duration_sec=row[5],
-                    duration_hr=row[6],
                 ))
             return result
 
@@ -556,7 +546,7 @@ def get_workout_detail(workout_id: str):
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT id, athlete_id, timestamp, workout_type, tss, duration_sec, duration_hr, json_file, csv_file, synced_at
+                SELECT id, athlete_id, timestamp, workout_type, tss, json_file
                 FROM workout
                 WHERE id = %s
                 """,
@@ -571,9 +561,5 @@ def get_workout_detail(workout_id: str):
                 timestamp=row[2].isoformat() if hasattr(row[2], 'isoformat') else str(row[2]),
                 workout_type=row[3],
                 tss=row[4],
-                duration_sec=row[5],
-                duration_hr=row[6],
-                json_file=row[7],
-                csv_file=row[8],
-                synced_at=row[9],
+                json_file=row[5],
             )
