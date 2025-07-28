@@ -1,6 +1,9 @@
 # AIronman Coaching App 🏊‍♂️🚴‍♂️🏃‍♂️
 
 > **Your AI-powered triathlon training companion**
+>
+> <img width="1481" height="813" alt="image" src="https://github.com/user-attachments/assets/7739d1fa-bfe0-447f-8107-df175a396547" />
+
 
 ## 🎯 Functional Overview - What Can You Do?
 
