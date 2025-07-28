@@ -738,6 +738,7 @@ function HealthTrendPlot({ data, title, color = "#06b6d4", unit = "" }) {
   const width = 400;
   const height = 200;
   const padding = 40;
+  const labelHeight = 30; // Extra space for rotated labels
 
   // Parse dates and get min/max values
   const dates = data.map(d => new Date(d.date));
@@ -777,7 +778,7 @@ function HealthTrendPlot({ data, title, color = "#06b6d4", unit = "" }) {
   return (
     <div className="health-plot-container">
       <h4>{title}</h4>
-      <svg width={width} height={height} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
+      <svg width={width} height={height + labelHeight} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
         {/* Grid lines */}
         <defs>
           <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
@@ -812,10 +813,11 @@ function HealthTrendPlot({ data, title, color = "#06b6d4", unit = "" }) {
           <text
             key={`label-${i}`}
             x={point.x}
-            y={height - 5}
-            textAnchor="middle"
+            y={height + 15}
+            textAnchor="end"
             fontSize="10"
             fill="#64748b"
+            transform={`rotate(-45, ${point.x}, ${height + 15})`}
           >
             {formatDate(point.date)}
           </text>
