@@ -25,6 +25,12 @@ function Sidebar({ selectedItem, onItemSelect }) {
         >
           Workouts
         </li>
+        <li
+          className={`sidebar-item ${selectedItem === 'health' ? 'active' : ''}`}
+          onClick={() => onItemSelect('health')}
+        >
+          Health & Recovery
+        </li>
       </ul>
     </div>
   );
@@ -428,11 +434,13 @@ function ViewProfile() {
   );
 }
 
-// Calendar utility: get dates for current week (Monday-Sunday)
-function getCurrentWeekDates() {
+// Calendar utility: get dates for any week (Monday-Sunday)
+function getWeekDates(weekOffset = 0) {
   const today = new Date();
   const monday = new Date(today);
   monday.setDate(today.getDate() - today.getDay() + 1); // Monday
+  // Add week offset
+  monday.setDate(monday.getDate() + (weekOffset * 7));
   const week = [];
   for (let i = 0; i < 7; i++) {
     const d = new Date(monday);
@@ -440,6 +448,11 @@ function getCurrentWeekDates() {
     week.push(d);
   }
   return week;
+}
+
+// Get current week dates (for backward compatibility)
+function getCurrentWeekDates() {
+  return getWeekDates(0);
 }
 
 function WorkoutsView() {
@@ -451,6 +464,7 @@ function WorkoutsView() {
   const [detailError, setDetailError] = useState(null);
   const [workoutDetail, setWorkoutDetail] = useState(null);
   const [athleteId, setAthleteId] = useState("");
+  const [weekOffset, setWeekOffset] = useState(0); // 0 = current week, -1 = previous week, etc.
 
   // Fetch athleteId from profile (assume single athlete for now)
   useEffect(() => {
@@ -468,12 +482,12 @@ function WorkoutsView() {
     fetchProfile();
   }, []);
 
-  // Fetch workouts for current week
+  // Fetch workouts for selected week
   useEffect(() => {
     if (!athleteId) return;
     setLoading(true);
     setError(null);
-    const week = getCurrentWeekDates();
+    const week = getWeekDates(weekOffset);
     const start = week[0].toISOString().slice(0, 10);
     const end = week[6].toISOString().slice(0, 10);
     fetch(`http://localhost:8000/api/workouts?athlete_id=${athleteId}&start_date=${start}&end_date=${end}`)
@@ -489,7 +503,7 @@ function WorkoutsView() {
         setError(err.message);
         setLoading(false);
       });
-  }, [athleteId]);
+  }, [athleteId, weekOffset]);
 
   // Fetch workout detail when selected
   useEffect(() => {
@@ -512,7 +526,7 @@ function WorkoutsView() {
       });
   }, [selectedWorkout]);
 
-  const week = getCurrentWeekDates();
+  const week = getWeekDates(weekOffset);
   // Group workouts by date (YYYY-MM-DD)
   const workoutsByDate = {};
   workouts.forEach(w => {
@@ -521,9 +535,64 @@ function WorkoutsView() {
     workoutsByDate[date].push(w);
   });
 
+  // Navigation functions
+  const goToPreviousWeek = () => {
+    setWeekOffset(weekOffset - 1);
+  };
+
+  const goToNextWeek = () => {
+    setWeekOffset(weekOffset + 1);
+  };
+
+  const goToCurrentWeek = () => {
+    setWeekOffset(0);
+  };
+
+  // Format week display
+  const formatWeekDisplay = () => {
+    const startDate = week[0];
+    const endDate = week[6];
+    const isCurrentWeek = weekOffset === 0;
+    
+    if (isCurrentWeek) {
+      return "This Week";
+    } else if (weekOffset === -1) {
+      return "Last Week";
+    } else if (weekOffset === 1) {
+      return "Next Week";
+    } else {
+      return `${startDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} - ${endDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+    }
+  };
+
   return (
     <div className="workouts-container">
-      <h2>Workouts This Week</h2>
+      <div className="workouts-header">
+        <button 
+          className="week-nav-btn" 
+          onClick={goToPreviousWeek}
+          title="Previous Week"
+        >
+          ←
+        </button>
+        <h2>Workouts {formatWeekDisplay()}</h2>
+        <button 
+          className="week-nav-btn" 
+          onClick={goToNextWeek}
+          title="Next Week"
+        >
+          →
+        </button>
+        {weekOffset !== 0 && (
+          <button 
+            className="current-week-btn" 
+            onClick={goToCurrentWeek}
+            title="Go to Current Week"
+          >
+            Today
+          </button>
+        )}
+      </div>
       {loading ? (
         <div className="loading-spinner">Loading workouts...</div>
       ) : error ? (
@@ -655,6 +724,366 @@ function SimpleWorkoutPlot({ data }) {
   );
 }
 
+// Health trend line plot component
+function HealthTrendPlot({ data, title, color = "#06b6d4", unit = "" }) {
+  if (!data || data.length === 0) {
+    return (
+      <div className="health-plot-container">
+        <h4>{title}</h4>
+        <div className="no-data">No data available</div>
+      </div>
+    );
+  }
+
+  const width = 400;
+  const height = 200;
+  const padding = 40;
+
+  // Parse dates and get min/max values
+  const dates = data.map(d => new Date(d.date));
+  const values = data.map(d => d.value);
+  const minDate = new Date(Math.min(...dates));
+  const maxDate = new Date(Math.max(...dates));
+  const minValue = Math.min(...values);
+  const maxValue = Math.max(...values);
+
+  // Scale functions
+  const scaleX = x => padding + ((x - minDate) / (maxDate - minDate)) * (width - 2 * padding);
+  const scaleY = y => height - padding - ((y - minValue) / (maxValue - minValue)) * (height - 2 * padding);
+
+  // Create line path
+  const linePath = data.map((d, i) => {
+    const x = scaleX(new Date(d.date));
+    const y = scaleY(d.value);
+    return `${i === 0 ? 'M' : 'L'} ${x} ${y}`;
+  }).join(' ');
+
+  // Create points
+  const points = data.map((d, i) => {
+    const x = scaleX(new Date(d.date));
+    const y = scaleY(d.value);
+    return { x, y, value: d.value, date: d.date };
+  });
+
+  // Format date for display
+  const formatDate = (dateStr) => {
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
+  // Add x-axis date labels (show every 3rd point to avoid crowding)
+  const dateLabels = points.filter((_, i) => i % 3 === 0 || i === points.length - 1);
+
+  return (
+    <div className="health-plot-container">
+      <h4>{title}</h4>
+      <svg width={width} height={height} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
+        {/* Grid lines */}
+        <defs>
+          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#e2e8f0" strokeWidth="1"/>
+          </pattern>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#grid)" />
+        
+        {/* Line */}
+        <path
+          d={linePath}
+          fill="none"
+          stroke={color}
+          strokeWidth="3"
+        />
+        
+        {/* Data points */}
+        {points.map((point, i) => (
+          <circle
+            key={i}
+            cx={point.x}
+            cy={point.y}
+            r="4"
+            fill={color}
+            stroke="white"
+            strokeWidth="2"
+          />
+        ))}
+        
+        {/* X-axis date labels */}
+        {dateLabels.map((point, i) => (
+          <text
+            key={`label-${i}`}
+            x={point.x}
+            y={height - 5}
+            textAnchor="middle"
+            fontSize="10"
+            fill="#64748b"
+          >
+            {formatDate(point.date)}
+          </text>
+        ))}
+        
+        {/* Y-axis labels */}
+        <text x="10" y={height/2} textAnchor="middle" transform={`rotate(-90, 10, ${height/2})`} fontSize="12" fill="#64748b">
+          {unit}
+        </text>
+        
+        {/* Y-axis value labels */}
+        {[0, 0.25, 0.5, 0.75, 1].map((ratio, i) => {
+          const value = minValue + (maxValue - minValue) * ratio;
+          const y = height - padding - (height - 2 * padding) * ratio;
+          return (
+            <text
+              key={`y-label-${i}`}
+              x={padding - 5}
+              y={y + 4}
+              textAnchor="end"
+              fontSize="10"
+              fill="#64748b"
+            >
+              {Math.round(value)}
+            </text>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+// Recovery status card component
+function RecoveryStatusCard({ status }) {
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'good': return '#10b981';
+      case 'moderate': return '#f59e0b';
+      case 'poor': return '#ef4444';
+      default: return '#64748b';
+    }
+  };
+
+  const getStatusText = (status) => {
+    switch (status) {
+      case 'good': return 'Good Recovery';
+      case 'moderate': return 'Moderate Recovery';
+      case 'poor': return 'Poor Recovery';
+      default: return 'Unknown';
+    }
+  };
+
+  return (
+    <div className="recovery-status-card">
+      <h3>Recovery Status</h3>
+      <div className="status-indicator" style={{ color: getStatusColor(status.status) }}>
+        <div className="status-score">{status.score}%</div>
+        <div className="status-text">{getStatusText(status.status)}</div>
+      </div>
+      <div className="status-factors">
+        <h4>Factors:</h4>
+        <ul>
+          {status.factors.map((factor, i) => (
+            <li key={i}>{factor}</li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+// Readiness recommendation card component
+function ReadinessCard({ recommendation }) {
+  const getRecommendationColor = (rec) => {
+    switch (rec) {
+      case 'train_hard': return '#10b981';
+      case 'maintain': return '#f59e0b';
+      case 'rest': return '#ef4444';
+      default: return '#64748b';
+    }
+  };
+
+  const getRecommendationText = (rec) => {
+    switch (rec) {
+      case 'train_hard': return 'Train Hard';
+      case 'maintain': return 'Maintain';
+      case 'rest': return 'Rest';
+      default: return 'Unknown';
+    }
+  };
+
+  return (
+    <div className="readiness-card">
+      <h3>Readiness Recommendation</h3>
+      <div className="recommendation-indicator" style={{ color: getRecommendationColor(recommendation.recommendation) }}>
+        <div className="recommendation-text">{getRecommendationText(recommendation.recommendation)}</div>
+        <div className="confidence-score">{recommendation.confidence}% confidence</div>
+      </div>
+      <div className="reasoning">
+        <h4>Reasoning:</h4>
+        <p>{recommendation.reasoning}</p>
+      </div>
+    </div>
+  );
+}
+
+// Health and Recovery Analysis component
+function HealthAnalysis() {
+  const [healthData, setHealthData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [athleteId, setAthleteId] = useState("");
+  const [weekOffset, setWeekOffset] = useState(0); // 0 = current week, -1 = previous week, etc.
+
+  // Fetch athleteId from profile
+  useEffect(() => {
+    const fetchProfile = async () => {
+      try {
+        const response = await fetch('http://localhost:8000/api/profile');
+        if (!response.ok) throw new Error('Failed to fetch profile');
+        const data = await response.json();
+        setAthleteId(data.athlete_id);
+      } catch (err) {
+        setError('Failed to load athlete profile');
+        setLoading(false);
+      }
+    };
+    fetchProfile();
+  }, []);
+
+  // Fetch health analysis data
+  useEffect(() => {
+    if (!athleteId) return;
+    setLoading(true);
+    setError(null);
+    
+    // Calculate date range based on week offset
+    const today = new Date();
+    const startDate = new Date(today);
+    startDate.setDate(today.getDate() + (weekOffset * 7) - 30); // 30 days before the target week
+    const endDate = new Date(today);
+    endDate.setDate(today.getDate() + (weekOffset * 7) + 7); // 7 days after the target week
+    
+    const start = startDate.toISOString().slice(0, 10);
+    const end = endDate.toISOString().slice(0, 10);
+    
+    fetch(`http://localhost:8000/api/health/analysis?athlete_id=${athleteId}&start_date=${start}&end_date=${end}`)
+      .then(res => {
+        if (!res.ok) throw new Error('Failed to fetch health data');
+        return res.json();
+      })
+      .then(data => {
+        setHealthData(data);
+        setLoading(false);
+      })
+      .catch(err => {
+        setError(err.message);
+        setLoading(false);
+      });
+  }, [athleteId, weekOffset]);
+
+  // Navigation functions
+  const goToPreviousWeek = () => setWeekOffset(prev => prev - 1);
+  const goToNextWeek = () => setWeekOffset(prev => prev + 1);
+  const goToCurrentWeek = () => setWeekOffset(0);
+
+  const formatWeekDisplay = () => {
+    if (weekOffset === 0) return "This Week";
+    if (weekOffset === -1) return "Last Week";
+    if (weekOffset === 1) return "Next Week";
+    if (weekOffset < 0) return `${Math.abs(weekOffset)} Weeks Ago`;
+    return `${weekOffset} Weeks Ahead`;
+  };
+
+  if (loading) {
+    return (
+      <div className="health-container">
+        <div className="loading-spinner">Loading health analysis...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="health-container">
+        <div className="error-message">{error}</div>
+      </div>
+    );
+  }
+
+  if (!healthData) {
+    return (
+      <div className="health-container">
+        <div className="error-message">No health data available</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="health-container">
+      <div className="health-header">
+        <div className="health-header-content">
+          <button
+            className="week-nav-btn"
+            onClick={goToPreviousWeek}
+            title="Previous Week"
+          >
+            ←
+          </button>
+          <div>
+            <h2>Health & Recovery Analysis</h2>
+            <p>Analysis of your sleep, HRV, and RHR trends {formatWeekDisplay()}</p>
+          </div>
+          <button
+            className="week-nav-btn"
+            onClick={goToNextWeek}
+            title="Next Week"
+          >
+            →
+          </button>
+          {weekOffset !== 0 && (
+            <button
+              className="current-week-btn"
+              onClick={goToCurrentWeek}
+              title="Go to Current Week"
+            >
+              Today
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="health-content">
+        <div className="trends-section">
+          <h3>Health Trends</h3>
+          <div className="trends-grid">
+            <HealthTrendPlot 
+              data={healthData.trends.sleep} 
+              title="Sleep Quality" 
+              color="#06b6d4" 
+              unit="score"
+            />
+            <HealthTrendPlot 
+              data={healthData.trends.hrv} 
+              title="Heart Rate Variability" 
+              color="#10b981" 
+              unit="ms"
+            />
+            <HealthTrendPlot 
+              data={healthData.trends.rhr} 
+              title="Resting Heart Rate" 
+              color="#f59e0b" 
+              unit="bpm"
+            />
+          </div>
+        </div>
+
+        <div className="analysis-section">
+          <div className="analysis-grid">
+            <RecoveryStatusCard status={healthData.recovery_status} />
+            <ReadinessCard recommendation={healthData.readiness_recommendation} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [selectedItem, setSelectedItem] = useState('sync');
 
@@ -666,6 +1095,8 @@ function App() {
         return <ViewProfile />;
       case 'workouts':
         return <WorkoutsView />;
+      case 'health':
+        return <HealthAnalysis />;
       default:
         return <div>Select an option from the sidebar</div>;
     }

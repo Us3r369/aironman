@@ -563,3 +563,288 @@ def get_workout_detail(workout_id: str):
                 tss=row[4],
                 json_file=row[5],
             )
+
+# --- Health and Recovery Analysis Endpoints ---
+
+class HealthMetricData(BaseModel):
+    date: str
+    value: float
+    unit: str
+
+class HealthTrendData(BaseModel):
+    sleep: List[HealthMetricData]
+    hrv: List[HealthMetricData]
+    rhr: List[HealthMetricData]
+
+class RecoveryStatus(BaseModel):
+    status: str  # "good", "moderate", "poor"
+    score: float  # 0-100
+    factors: List[str]
+
+class ReadinessRecommendation(BaseModel):
+    recommendation: str  # "train_hard", "maintain", "rest"
+    confidence: float  # 0-100
+    reasoning: str
+
+class HealthAnalysisResponse(BaseModel):
+    trends: HealthTrendData
+    recovery_status: RecoveryStatus
+    readiness_recommendation: ReadinessRecommendation
+
+@app.get("/api/health/trends", response_model=HealthTrendData)
+def get_health_trends(
+    athlete_id: str = Query(..., description="Athlete UUID or name"),
+    days: int = Query(30, description="Number of days to analyze")
+):
+    """Get health trends (sleep, HRV, RHR) for the specified number of days."""
+    try:
+        athlete_uuid = get_athlete_uuid(athlete_id)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Athlete not found: {e}")
+
+    with get_db_conn() as conn:
+        with conn.cursor() as cur:
+            # Get sleep data
+            cur.execute("""
+                SELECT timestamp, json_file
+                FROM sleep
+                WHERE athlete_id = %s AND timestamp >= NOW() - INTERVAL '%s days'
+                ORDER BY timestamp ASC
+            """, (athlete_uuid, days))
+            sleep_data = []
+            sleep_rows = cur.fetchall()
+            for row in sleep_rows:
+                json_data = row[1]
+                if json_data and isinstance(json_data, dict):
+                    # Extract sleep score from Garmin data
+                    sleep_score = None
+                    if 'sleepScore' in json_data:
+                        sleep_score = json_data['sleepScore']
+                    elif 'sleepScoreDTO' in json_data and 'sleepScore' in json_data['sleepScoreDTO']:
+                        sleep_score = json_data['sleepScoreDTO']['sleepScore']
+                    elif 'dailySleepDTO' in json_data and 'sleepScores' in json_data['dailySleepDTO']:
+                        sleep_scores = json_data['dailySleepDTO']['sleepScores']
+                        if 'overall' in sleep_scores and 'value' in sleep_scores['overall']:
+                            sleep_score = sleep_scores['overall']['value']
+                    
+                    if sleep_score is not None:
+                        sleep_data.append(HealthMetricData(
+                            date=row[0].isoformat() if hasattr(row[0], 'isoformat') else str(row[0]),
+                            value=float(sleep_score),
+                            unit="score"
+                        ))
+
+            # Get HRV data
+            cur.execute("""
+                SELECT timestamp, json_file
+                FROM hrv
+                WHERE athlete_id = %s AND timestamp >= NOW() - INTERVAL '%s days'
+                ORDER BY timestamp ASC
+            """, (athlete_uuid, days))
+            hrv_data = []
+            for row in cur.fetchall():
+                json_data = row[1]
+                if json_data and isinstance(json_data, dict):
+                    # Extract HRV value from Garmin data
+                    hrv_value = None
+                    if 'hrvSummary' in json_data:
+                        hrv_summary = json_data['hrvSummary']
+                        if 'weeklyAvg' in hrv_summary:
+                            hrv_value = hrv_summary['weeklyAvg']
+                        elif 'lastNightAvg' in hrv_summary:
+                            hrv_value = hrv_summary['lastNightAvg']
+                        elif 'hrvWeeklyAverage' in hrv_summary:
+                            hrv_value = hrv_summary['hrvWeeklyAverage']
+                        elif 'hrvDailyAverage' in hrv_summary:
+                            hrv_value = hrv_summary['hrvDailyAverage']
+                    
+                    if hrv_value is not None:
+                        hrv_data.append(HealthMetricData(
+                            date=row[0].isoformat() if hasattr(row[0], 'isoformat') else str(row[0]),
+                            value=float(hrv_value),
+                            unit="ms"
+                        ))
+
+            # Get RHR data
+            cur.execute("""
+                SELECT timestamp, json_file
+                FROM rhr
+                WHERE athlete_id = %s AND timestamp >= NOW() - INTERVAL '%s days'
+                ORDER BY timestamp ASC
+            """, (athlete_uuid, days))
+            rhr_data = []
+            for row in cur.fetchall():
+                json_data = row[1]
+                if json_data and isinstance(json_data, dict):
+                    # Extract RHR value from Garmin data
+                    rhr_value = None
+                    if 'allMetrics' in json_data and 'metricsMap' in json_data['allMetrics']:
+                        metrics_map = json_data['allMetrics']['metricsMap']
+                        if 'WELLNESS_RESTING_HEART_RATE' in metrics_map:
+                            rhr_list = metrics_map['WELLNESS_RESTING_HEART_RATE']
+                            if rhr_list and len(rhr_list) > 0:
+                                rhr_value = rhr_list[0].get('value')
+                    
+                    if rhr_value is not None:
+                        rhr_data.append(HealthMetricData(
+                            date=row[0].isoformat() if hasattr(row[0], 'isoformat') else str(row[0]),
+                            value=float(rhr_value),
+                            unit="bpm"
+                        ))
+
+            return HealthTrendData(
+                sleep=sleep_data,
+                hrv=hrv_data,
+                rhr=rhr_data
+            )
+
+@app.get("/api/health/recovery-status", response_model=RecoveryStatus)
+def get_recovery_status(
+    athlete_id: str = Query(..., description="Athlete UUID or name")
+):
+    """Get recovery status assessment (placeholder implementation)."""
+    # TODO: Implement actual recovery status calculation based on health trends
+    # For now, return dummy data
+    return RecoveryStatus(
+        status="good",
+        score=85.0,
+        factors=["Good sleep quality", "Stable HRV", "Low RHR"]
+    )
+
+@app.get("/api/health/readiness", response_model=ReadinessRecommendation)
+def get_readiness_recommendation(
+    athlete_id: str = Query(..., description="Athlete UUID or name")
+):
+    """Get readiness recommendation (placeholder implementation)."""
+    # TODO: Implement actual readiness calculation based on recovery status and recent training
+    # For now, return dummy data
+    return ReadinessRecommendation(
+        recommendation="maintain",
+        confidence=75.0,
+        reasoning="Good recovery status, moderate training load"
+    )
+
+def get_health_trends_with_dates(athlete_id: str, start_date: str, end_date: str) -> HealthTrendData:
+    """Get health trends for a specific date range."""
+    try:
+        with get_db_conn() as conn:
+            with conn.cursor() as cur:
+                # Get athlete UUID from athlete table
+                cur.execute("SELECT id FROM athlete WHERE name = %s", (athlete_id,))
+                result = cur.fetchone()
+                if not result:
+                    raise ProfileNotFoundException(f"Athlete {athlete_id} not found")
+                athlete_uuid = result[0]
+
+                # Get sleep data
+                cur.execute("""
+                    SELECT timestamp, json_file
+                    FROM sleep
+                    WHERE athlete_id = %s AND timestamp >= %s AND timestamp <= %s
+                    ORDER BY timestamp ASC
+                """, (athlete_uuid, start_date, end_date))
+                sleep_data = []
+                for row in cur.fetchall():
+                    json_data = row[1]
+                    if json_data and isinstance(json_data, dict):
+                        # Extract sleep score from Garmin data
+                        sleep_score = None
+                        if 'dailySleepDTO' in json_data and 'sleepScores' in json_data['dailySleepDTO']:
+                            sleep_scores = json_data['dailySleepDTO']['sleepScores']
+                            if 'overall' in sleep_scores and 'value' in sleep_scores['overall']:
+                                sleep_score = sleep_scores['overall']['value']
+                        
+                        if sleep_score is not None:
+                            sleep_data.append(HealthMetricData(
+                                date=row[0].isoformat() if hasattr(row[0], 'isoformat') else str(row[0]),
+                                value=float(sleep_score),
+                                unit="score"
+                            ))
+
+                # Get HRV data
+                cur.execute("""
+                    SELECT timestamp, json_file
+                    FROM hrv
+                    WHERE athlete_id = %s AND timestamp >= %s AND timestamp <= %s
+                    ORDER BY timestamp ASC
+                """, (athlete_uuid, start_date, end_date))
+                hrv_data = []
+                for row in cur.fetchall():
+                    json_data = row[1]
+                    if json_data and isinstance(json_data, dict):
+                        # Extract HRV value from Garmin data
+                        hrv_value = None
+                        if 'hrvSummary' in json_data:
+                            hrv_summary = json_data['hrvSummary']
+                            if 'weeklyAvg' in hrv_summary:
+                                hrv_value = hrv_summary['weeklyAvg']
+                            elif 'lastNightAvg' in hrv_summary:
+                                hrv_value = hrv_summary['lastNightAvg']
+                            elif 'hrvWeeklyAverage' in hrv_summary:
+                                hrv_value = hrv_summary['hrvWeeklyAverage']
+                            elif 'hrvDailyAverage' in hrv_summary:
+                                hrv_value = hrv_summary['hrvDailyAverage']
+                        
+                        if hrv_value is not None:
+                            hrv_data.append(HealthMetricData(
+                                date=row[0].isoformat() if hasattr(row[0], 'isoformat') else str(row[0]),
+                                value=float(hrv_value),
+                                unit="ms"
+                            ))
+
+                # Get RHR data
+                cur.execute("""
+                    SELECT timestamp, json_file
+                    FROM rhr
+                    WHERE athlete_id = %s AND timestamp >= %s AND timestamp <= %s
+                    ORDER BY timestamp ASC
+                """, (athlete_uuid, start_date, end_date))
+                rhr_data = []
+                for row in cur.fetchall():
+                    json_data = row[1]
+                    if json_data and isinstance(json_data, dict):
+                        # Extract RHR value from Garmin data
+                        rhr_value = None
+                        if 'allMetrics' in json_data and 'metricsMap' in json_data['allMetrics']:
+                            metrics_map = json_data['allMetrics']['metricsMap']
+                            if 'WELLNESS_RESTING_HEART_RATE' in metrics_map:
+                                rhr_list = metrics_map['WELLNESS_RESTING_HEART_RATE']
+                                if rhr_list and len(rhr_list) > 0:
+                                    rhr_value = rhr_list[0].get('value')
+                        
+                        if rhr_value is not None:
+                            rhr_data.append(HealthMetricData(
+                                date=row[0].isoformat() if hasattr(row[0], 'isoformat') else str(row[0]),
+                                value=float(rhr_value),
+                                unit="bpm"
+                            ))
+
+                return HealthTrendData(
+                    sleep=sleep_data,
+                    hrv=hrv_data,
+                    rhr=rhr_data
+                )
+    except Exception as e:
+        raise DatabaseException(f"Failed to get health trends: {str(e)}")
+
+@app.get("/api/health/analysis", response_model=HealthAnalysisResponse)
+def get_health_analysis(
+    athlete_id: str = Query(..., description="Athlete UUID or name"),
+    days: int = Query(30, description="Number of days to analyze"),
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)")
+):
+    """Get comprehensive health analysis including trends, recovery status, and readiness."""
+    if start_date and end_date:
+        trends = get_health_trends_with_dates(athlete_id, start_date, end_date)
+    else:
+        trends = get_health_trends(athlete_id, days)
+    
+    recovery_status = get_recovery_status(athlete_id)
+    readiness_recommendation = get_readiness_recommendation(athlete_id)
+    
+    return HealthAnalysisResponse(
+        trends=trends,
+        recovery_status=recovery_status,
+        readiness_recommendation=readiness_recommendation
+    )

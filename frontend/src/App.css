@@ -498,6 +498,243 @@ body.modal-open {
 .workouts-container {
   padding: 24px;
 }
+
+.workouts-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-bottom: 24px;
+  position: relative;
+}
+
+.workouts-header h2 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 2rem;
+  font-weight: 700;
+}
+
+.week-nav-btn {
+  background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);
+  color: white;
+  border: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  font-size: 1.2rem;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(6, 182, 212, 0.2);
+}
+
+.week-nav-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(6, 182, 212, 0.3);
+  background: linear-gradient(135deg, #0891b2 0%, #06b6d4 100%);
+}
+
+.week-nav-btn:active {
+  transform: translateY(0);
+}
+
+.current-week-btn {
+  background: linear-gradient(135deg, #64748b 0%, #475569 100%);
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.current-week-btn:hover {
+  background: linear-gradient(135deg, #475569 0%, #64748b 100%);
+  transform: translateY(-50%) scale(1.05);
+}
+
+/* Health and Recovery Analysis Styles */
+.health-container {
+  max-width: 1200px;
+  padding: 24px;
+}
+
+.health-header {
+  margin-bottom: 32px;
+  padding-bottom: 24px;
+  border-bottom: 2px solid #e2e8f0;
+}
+
+.health-header-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  position: relative;
+}
+
+.health-header-content > div {
+  text-align: center;
+}
+
+.health-header h2 {
+  color: #0f172a;
+  font-size: 2.5rem;
+  font-weight: 800;
+  margin: 0 0 16px 0;
+  letter-spacing: -0.025em;
+}
+
+.health-header p {
+  color: #64748b;
+  font-size: 1.1rem;
+  margin: 0;
+}
+
+.health-content {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.trends-section h3 {
+  color: #0f172a;
+  font-size: 1.8rem;
+  font-weight: 700;
+  margin: 0 0 24px 0;
+}
+
+.trends-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+  gap: 24px;
+}
+
+.health-plot-container {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.health-plot-container h4 {
+  color: #0f172a;
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin: 0 0 16px 0;
+  text-align: center;
+}
+
+.no-data {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 200px;
+  color: #64748b;
+  font-style: italic;
+}
+
+.analysis-section {
+  margin-top: 32px;
+}
+
+.analysis-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+  gap: 24px;
+}
+
+.recovery-status-card,
+.readiness-card {
+  background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+  border: 1px solid #475569;
+  border-radius: 12px;
+  padding: 24px;
+  color: white;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.recovery-status-card:hover,
+.readiness-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 25px -3px rgba(0, 0, 0, 0.2);
+}
+
+.recovery-status-card h3,
+.readiness-card h3 {
+  color: #06b6d4;
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0 0 20px 0;
+  text-align: center;
+}
+
+.status-indicator,
+.recommendation-indicator {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.status-score,
+.confidence-score {
+  font-size: 2rem;
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+
+.status-text,
+.recommendation-text {
+  font-size: 1.2rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.status-factors h4,
+.reasoning h4 {
+  color: #06b6d4;
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 0 0 12px 0;
+}
+
+.status-factors ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.status-factors li {
+  color: #e2e8f0;
+  margin-bottom: 8px;
+  padding-left: 16px;
+  position: relative;
+}
+
+.status-factors li:before {
+  content: "•";
+  color: #06b6d4;
+  position: absolute;
+  left: 0;
+}
+
+.reasoning p {
+  color: #e2e8f0;
+  line-height: 1.6;
+  margin: 0;
+}
 .calendar-table {
   width: 100%;
   border-collapse: collapse;
