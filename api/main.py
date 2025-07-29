@@ -20,6 +20,7 @@ from utils.exceptions import (
     ProfileValidationException, SyncException, ValidationException
 )
 from utils.database import get_db_conn, get_athlete_uuid
+from services.pmc_metrics import pmc_metrics
 
 # Setup logging
 setup_logging(log_level="INFO", log_file="logs/app.log")
@@ -591,6 +592,17 @@ class HealthAnalysisResponse(BaseModel):
     recovery_status: RecoveryStatus
     readiness_recommendation: ReadinessRecommendation
 
+# --- PMC (Performance Management Chart) Models ---
+class PMCMetricData(BaseModel):
+    date: str
+    ctl: float
+    atl: float
+    tsb: float
+
+class PMCResponse(BaseModel):
+    metrics: List[PMCMetricData]
+    summary: Dict[str, float]  # Latest CTL, ATL, TSB values
+
 @app.get("/api/health/trends", response_model=HealthTrendData)
 def get_health_trends(
     athlete_id: str = Query(..., description="Athlete UUID or name"),
@@ -848,3 +860,72 @@ def get_health_analysis(
         recovery_status=recovery_status,
         readiness_recommendation=readiness_recommendation
     )
+
+@app.get("/api/metrics/pmc", response_model=PMCResponse)
+def get_pmc_metrics(
+    athlete_id: str = Query(..., description="Athlete UUID or name"),
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    days: int = Query(30, description="Number of days to analyze (if start_date/end_date not provided)")
+):
+    """Get Performance Management Chart (PMC) metrics including CTL, ATL, and TSB."""
+    try:
+        from datetime import date
+        
+        # Determine date range
+        if start_date and end_date:
+            start = date.fromisoformat(start_date)
+            end = date.fromisoformat(end_date)
+        else:
+            end = date.today()
+            start = end - timedelta(days=days)
+        
+        # Get PMC data from database
+        pmc_data = pmc_metrics.get_pmc_data(athlete_id, start, end)
+        
+        # Convert to Pydantic models
+        metrics = []
+        for data in pmc_data:
+            metrics.append(PMCMetricData(
+                date=data['date'],
+                ctl=data['ctl'],
+                atl=data['atl'],
+                tsb=data['tsb']
+            ))
+        
+        # Calculate summary (latest values)
+        summary = {}
+        if metrics:
+            latest = metrics[-1]
+            summary = {
+                'ctl': latest.ctl,
+                'atl': latest.atl,
+                'tsb': latest.tsb
+            }
+        else:
+            # If no data, calculate for today
+            today_metrics = pmc_metrics.calculate_daily_metrics(athlete_id, date.today())
+            pmc_metrics.save_daily_metrics(athlete_id, date.today(), today_metrics)
+            
+            summary = {
+                'ctl': today_metrics['ctl'],
+                'atl': today_metrics['atl'],
+                'tsb': today_metrics['tsb']
+            }
+            
+            # Add today's data to metrics
+            metrics.append(PMCMetricData(
+                date=date.today().isoformat(),
+                ctl=today_metrics['ctl'],
+                atl=today_metrics['atl'],
+                tsb=today_metrics['tsb']
+            ))
+        
+        return PMCResponse(
+            metrics=metrics,
+            summary=summary
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to get PMC metrics: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get PMC metrics: {str(e)}")

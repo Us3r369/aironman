@@ -8,6 +8,12 @@ function Sidebar({ selectedItem, onItemSelect }) {
       <div className="sidebar-title">AIronman</div>
       <ul>
         <li 
+          className={`sidebar-item ${selectedItem === 'pmc' ? 'active' : ''}`}
+          onClick={() => onItemSelect('pmc')}
+        >
+          📈 Performance Chart
+        </li>
+        <li 
           className={`sidebar-item ${selectedItem === 'sync' ? 'active' : ''}`}
           onClick={() => onItemSelect('sync')}
         >
@@ -724,6 +730,267 @@ function SimpleWorkoutPlot({ data }) {
   );
 }
 
+// PMC Chart component - Professional Performance Management Chart
+function PMCChart({ pmcData, workoutsData }) {
+  if (!pmcData || pmcData.length === 0) {
+    return (
+      <div className="pmc-chart-container">
+        <div className="no-data">No PMC data available</div>
+      </div>
+    );
+  }
+
+  const width = 800;
+  const height = 400;
+  const padding = { top: 40, right: 80, bottom: 60, left: 60 };
+  const chartWidth = width - padding.left - padding.right;
+  const chartHeight = height - padding.top - padding.bottom;
+
+  // Parse dates and calculate ranges
+  const dates = pmcData.map(d => new Date(d.date));
+  const minDate = new Date(Math.min(...dates));
+  const maxDate = new Date(Math.max(...dates));
+  
+  // Calculate ranges for dual Y-axes
+  const ctlValues = pmcData.map(d => d.ctl);
+  const atlValues = pmcData.map(d => d.atl);
+  const tsbValues = pmcData.map(d => d.tsb);
+  
+  const maxTSS = Math.max(...ctlValues, ...atlValues, 100); // Ensure minimum range
+  const minTSB = Math.min(...tsbValues, -20); // Ensure negative range
+  const maxTSB = Math.max(...tsbValues, 20);  // Ensure positive range
+
+  // Scale functions
+  const scaleX = x => padding.left + ((x - minDate) / (maxDate - minDate)) * chartWidth;
+  const scaleYTSS = y => padding.top + (1 - (y / maxTSS)) * chartHeight;
+  const scaleYTSB = y => padding.top + (1 - ((y - minTSB) / (maxTSB - minTSB))) * chartHeight;
+
+  // Format date for display
+  const formatDate = (date) => {
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
+  // Create paths for each metric
+  const createPath = (data, scaleY, key) => {
+    return data.map((d, i) => {
+      const x = scaleX(new Date(d.date));
+      const y = scaleY(d[key]);
+      return `${i === 0 ? 'M' : 'L'} ${x} ${y}`;
+    }).join(' ');
+  };
+
+  const ctlPath = createPath(pmcData, scaleYTSS, 'ctl');
+  const atlPath = createPath(pmcData, scaleYTSS, 'atl');
+  const tsbPath = createPath(pmcData, scaleYTSB, 'tsb');
+
+  // Create workout scatter points
+  const workoutPoints = workoutsData ? workoutsData.map(w => ({
+    x: scaleX(new Date(w.date)),
+    y: scaleYTSS(w.tss),
+    tss: w.tss,
+    date: w.date
+  })) : [];
+
+  // Generate Y-axis labels
+  const tssLabels = [0, 50, 100, 150, 200, 250, 300];
+  const tsbLabels = [-60, -40, -20, 0, 20, 40, 60];
+
+  return (
+    <div className="pmc-chart-container">
+      <h3>Performance Management Chart</h3>
+      <svg width={width} height={height} style={{ background: 'white', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
+        {/* Grid lines for TSS */}
+        {tssLabels.map(tss => {
+          const y = scaleYTSS(tss);
+          return (
+            <line
+              key={`grid-tss-${tss}`}
+              x1={padding.left}
+              y1={y}
+              x2={width - padding.right}
+              y2={y}
+              stroke="#f1f5f9"
+              strokeWidth="1"
+            />
+          );
+        })}
+
+        {/* CTL line with shaded area */}
+        <defs>
+          <linearGradient id="ctlGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor="#374151" stopOpacity="0.3"/>
+            <stop offset="100%" stopColor="#374151" stopOpacity="0.1"/>
+          </linearGradient>
+        </defs>
+        
+        {/* CTL shaded area */}
+        <path
+          d={`${ctlPath} L ${scaleX(maxDate)} ${scaleYTSS(0)} L ${scaleX(minDate)} ${scaleYTSS(0)} Z`}
+          fill="url(#ctlGradient)"
+        />
+        
+        {/* CTL line */}
+        <path
+          d={ctlPath}
+          fill="none"
+          stroke="#374151"
+          strokeWidth="3"
+        />
+
+        {/* ATL line */}
+        <path
+          d={atlPath}
+          fill="none"
+          stroke="#f97316"
+          strokeWidth="2"
+        />
+
+        {/* TSB line */}
+        <path
+          d={tsbPath}
+          fill="none"
+          stroke="#ec4899"
+          strokeWidth="2"
+        />
+
+        {/* Workout scatter points */}
+        {workoutPoints.map((point, i) => (
+          <circle
+            key={`workout-${i}`}
+            cx={point.x}
+            cy={point.y}
+            r="3"
+            fill="#3b82f6"
+            opacity="0.7"
+          />
+        ))}
+
+        {/* X-axis */}
+        <line
+          x1={padding.left}
+          y1={height - padding.bottom}
+          x2={width - padding.right}
+          y2={height - padding.bottom}
+          stroke="#64748b"
+          strokeWidth="2"
+        />
+
+        {/* X-axis labels */}
+        {pmcData.filter((_, i) => i % 3 === 0 || i === pmcData.length - 1).map((d, i) => {
+          const x = scaleX(new Date(d.date));
+          return (
+            <text
+              key={`x-label-${i}`}
+              x={x}
+              y={height - padding.bottom + 20}
+              textAnchor="middle"
+              fontSize="10"
+              fill="#64748b"
+              transform={`rotate(-45, ${x}, ${height - padding.bottom + 20})`}
+            >
+              {formatDate(new Date(d.date))}
+            </text>
+          );
+        })}
+
+        {/* Left Y-axis (TSS) */}
+        <line
+          x1={padding.left}
+          y1={padding.top}
+          x2={padding.left}
+          y2={height - padding.bottom}
+          stroke="#64748b"
+          strokeWidth="2"
+        />
+
+        {/* Left Y-axis labels */}
+        {tssLabels.map(tss => {
+          const y = scaleYTSS(tss);
+          return (
+            <text
+              key={`y-tss-${tss}`}
+              x={padding.left - 10}
+              y={y + 4}
+              textAnchor="end"
+              fontSize="10"
+              fill="#64748b"
+            >
+              {tss}
+            </text>
+          );
+        })}
+
+        {/* Right Y-axis (TSB) */}
+        <line
+          x1={width - padding.right}
+          y1={padding.top}
+          x2={width - padding.right}
+          y2={height - padding.bottom}
+          stroke="#64748b"
+          strokeWidth="2"
+        />
+
+        {/* Right Y-axis labels */}
+        {tsbLabels.map(tsb => {
+          const y = scaleYTSB(tsb);
+          return (
+            <text
+              key={`y-tsb-${tsb}`}
+              x={width - padding.right + 10}
+              y={y + 4}
+              textAnchor="start"
+              fontSize="10"
+              fill="#64748b"
+            >
+              {tsb}
+            </text>
+          );
+        })}
+
+        {/* Axis titles */}
+        <text
+          x={padding.left - 30}
+          y={height / 2}
+          textAnchor="middle"
+          transform={`rotate(-90, ${padding.left - 30}, ${height / 2})`}
+          fontSize="12"
+          fill="#374151"
+          fontWeight="600"
+        >
+          TSS/d
+        </text>
+
+        <text
+          x={width - padding.right + 30}
+          y={height / 2}
+          textAnchor="middle"
+          transform={`rotate(90, ${width - padding.right + 30}, ${height / 2})`}
+          fontSize="12"
+          fill="#374151"
+          fontWeight="600"
+        >
+          Form (TSB)
+        </text>
+
+        {/* Legend */}
+        <g transform={`translate(${padding.left}, ${padding.top - 20})`}>
+          <circle cx="0" cy="0" r="4" fill="#374151"/>
+          <text x="15" y="4" fontSize="10" fill="#374151">CTL</text>
+          
+          <circle cx="80" cy="0" r="4" fill="#f97316"/>
+          <text x="95" y="4" fontSize="10" fill="#f97316">ATL</text>
+          
+          <circle cx="140" cy="0" r="4" fill="#ec4899"/>
+          <text x="155" y="4" fontSize="10" fill="#ec4899">TSB</text>
+          
+          <circle cx="200" cy="0" r="3" fill="#3b82f6" opacity="0.7"/>
+          <text x="215" y="4" fontSize="10" fill="#3b82f6">Daily TSS</text>
+        </g>
+      </svg>
+    </div>
+  );
+}
+
 // Health trend line plot component
 function HealthTrendPlot({ data, title, color = "#06b6d4", unit = "" }) {
   if (!data || data.length === 0) {
@@ -924,6 +1191,178 @@ function ReadinessCard({ recommendation }) {
   );
 }
 
+// PMC Dashboard component
+function PMCDashboard() {
+  const [pmcData, setPmcData] = useState(null);
+  const [workoutsData, setWorkoutsData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [athleteId, setAthleteId] = useState("");
+  const [weekOffset, setWeekOffset] = useState(0);
+
+  // Fetch athleteId from profile
+  useEffect(() => {
+    const fetchProfile = async () => {
+      try {
+        const response = await fetch('http://localhost:8000/api/profile');
+        if (!response.ok) throw new Error('Failed to fetch profile');
+        const data = await response.json();
+        setAthleteId(data.athlete_id);
+      } catch (err) {
+        setError('Failed to load athlete profile');
+        setLoading(false);
+      }
+    };
+    fetchProfile();
+  }, []);
+
+  // Fetch PMC data and workouts
+  useEffect(() => {
+    if (!athleteId) return;
+    setLoading(true);
+    setError(null);
+    
+    // Calculate date range based on week offset
+    const today = new Date();
+    const startDate = new Date(today);
+    startDate.setDate(today.getDate() + (weekOffset * 7) - 30);
+    const endDate = new Date(today);
+    endDate.setDate(today.getDate() + (weekOffset * 7) + 7);
+    
+    const start = startDate.toISOString().slice(0, 10);
+    const end = endDate.toISOString().slice(0, 10);
+    
+    // Fetch PMC data
+    const fetchPMCData = fetch(`http://localhost:8000/api/metrics/pmc?athlete_id=${athleteId}&start_date=${start}&end_date=${end}`)
+      .then(res => {
+        if (!res.ok) throw new Error('Failed to fetch PMC data');
+        return res.json();
+      });
+    
+    // Fetch workouts data for scatter plot
+    const fetchWorkoutsData = fetch(`http://localhost:8000/api/workouts?athlete_id=${athleteId}&start_date=${start}&end_date=${end}`)
+      .then(res => {
+        if (!res.ok) throw new Error('Failed to fetch workouts data');
+        return res.json();
+      })
+      .then(workouts => workouts.map(w => ({
+        date: w.timestamp,
+        tss: w.tss || 0
+      })));
+    
+    // Wait for both requests to complete
+    Promise.all([fetchPMCData, fetchWorkoutsData])
+      .then(([pmc, workouts]) => {
+        setPmcData(pmc);
+        setWorkoutsData(workouts);
+        setLoading(false);
+      })
+      .catch(err => {
+        setError(err.message);
+        setLoading(false);
+      });
+  }, [athleteId, weekOffset]);
+
+  // Navigation functions
+  const goToPreviousWeek = () => setWeekOffset(prev => prev - 1);
+  const goToNextWeek = () => setWeekOffset(prev => prev + 1);
+  const goToCurrentWeek = () => setWeekOffset(0);
+
+  const formatWeekDisplay = () => {
+    if (weekOffset === 0) return "This Week";
+    if (weekOffset === -1) return "Last Week";
+    if (weekOffset === 1) return "Next Week";
+    if (weekOffset < 0) return `${Math.abs(weekOffset)} Weeks Ago`;
+    return `${weekOffset} Weeks Ahead`;
+  };
+
+  if (loading) {
+    return (
+      <div className="pmc-container">
+        <div className="loading-spinner">Loading PMC data...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="pmc-container">
+        <div className="error-message">{error}</div>
+      </div>
+    );
+  }
+
+  if (!pmcData) {
+    return (
+      <div className="pmc-container">
+        <div className="error-message">No PMC data available</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="pmc-container">
+      <div className="pmc-header">
+        <div className="pmc-header-content">
+          <button
+            className="week-nav-btn"
+            onClick={goToPreviousWeek}
+            title="Previous Week"
+          >
+            ←
+          </button>
+          <div>
+            <h2>Performance Management Chart</h2>
+            <p>Your training load and readiness {formatWeekDisplay()}</p>
+          </div>
+          <button
+            className="week-nav-btn"
+            onClick={goToNextWeek}
+            title="Next Week"
+          >
+            →
+          </button>
+          {weekOffset !== 0 && (
+            <button
+              className="current-week-btn"
+              onClick={goToCurrentWeek}
+              title="Go to Current Week"
+            >
+              Today
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="pmc-content">
+        <div className="pmc-summary">
+          <div className="pmc-summary-card">
+            <h3>CTL (Fitness)</h3>
+            <div className="pmc-value">{pmcData.summary.ctl}</div>
+            <p>Chronic Training Load</p>
+          </div>
+          <div className="pmc-summary-card">
+            <h3>ATL (Fatigue)</h3>
+            <div className="pmc-value">{pmcData.summary.atl}</div>
+            <p>Acute Training Load</p>
+          </div>
+          <div className="pmc-summary-card">
+            <h3>TSB (Readiness)</h3>
+            <div className={`pmc-value ${pmcData.summary.tsb > 0 ? 'positive' : 'negative'}`}>
+              {pmcData.summary.tsb}
+            </div>
+            <p>Training Stress Balance</p>
+          </div>
+        </div>
+
+        <div className="pmc-chart-wrapper">
+          <PMCChart pmcData={pmcData.metrics} workoutsData={workoutsData} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Health and Recovery Analysis component
 function HealthAnalysis() {
   const [healthData, setHealthData] = useState(null);
@@ -1087,10 +1526,12 @@ function HealthAnalysis() {
 }
 
 function App() {
-  const [selectedItem, setSelectedItem] = useState('sync');
+  const [selectedItem, setSelectedItem] = useState('pmc');
 
   const renderMainContent = () => {
     switch (selectedItem) {
+      case 'pmc':
+        return <PMCDashboard />;
       case 'sync':
         return <SyncData />;
       case 'profile':
@@ -1100,7 +1541,7 @@ function App() {
       case 'health':
         return <HealthAnalysis />;
       default:
-        return <div>Select an option from the sidebar</div>;
+        return <PMCDashboard />;
     }
   };
 
