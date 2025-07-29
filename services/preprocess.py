@@ -15,6 +15,7 @@ import pandas as pd
 from utils.config import settings
 from utils.file_utils import sanitize_filename, save_json_data, load_json_data
 import csv
+from agents.zone_analysis_agent import analyze_workout_zones
 
 logger = logging.getLogger("preprocess")
 logging.basicConfig(level=logging.INFO)
@@ -321,6 +322,7 @@ def calculate_tss_run(trackpoints: List[Dict[str, Any]], critical_power: int) ->
 def calculate_tss_swim(csv_file: Path, profile: Dict[str, Any]) -> Tuple[Optional[float], Optional[int], Optional[float]]:
     """
     Calculate TSS for swim workout using the swim CSV file.
+    Simplified version that uses the Summary row data instead of adding up individual splits.
     Args:
         csv_file: Path to the swim workout CSV file
         profile: Athlete profile data
@@ -331,30 +333,41 @@ def calculate_tss_swim(csv_file: Path, profile: Dict[str, Any]) -> Tuple[Optiona
         css = profile["zones"]["swim"].get("css_pace_per_100m")
         if not css:
             return None, None, None
-        # Convert CSS (pace per 100m, e.g. "1:40") to m/min
+        # Convert CSS (pace per 100m, e.g. "2:14") to m/min
         m, s = map(int, css.split(":"))
         css_seconds = m * 60 + s
         css_speed = 100 / (css_seconds / 60)  # m/min
-        total_distance = 0.0
-        moving_time = 0.0
+        
+        # Read the CSV file and find the Summary row
         with open(csv_file, newline='') as f:
             reader = csv.DictReader(f)
-            for row in reader:
-                split_val = row.get("Split", "").strip().lower()
-                if split_val not in ("rest", "summary"):
-                    try:
-                        total_distance += float(row.get("Distance", 0))
-                        # Parse time string to seconds
-                        moving_time += parse_time_to_seconds(row.get("Time", "0")) / 60  # convert to minutes
-                    except Exception:
-                        continue
-        if moving_time == 0 or css_speed == 0:
+            rows = list(reader)
+            
+        # Find the Summary row (last row)
+        summary_row = None
+        for row in reversed(rows):
+            if row.get("Split", "").strip().lower() == "summary":
+                summary_row = row
+                break
+        
+        if not summary_row:
+            logger.warning(f"No Summary row found in {csv_file}")
             return None, None, None
-        nss = total_distance / moving_time  # m/min
+        
+        # Extract total distance and time from Summary row
+        total_distance = float(summary_row.get("Distance", 0))
+        total_time_str = summary_row.get("Time", "0")
+        total_time_minutes = parse_time_to_seconds(total_time_str) / 60  # convert to minutes
+        
+        if total_time_minutes == 0 or css_speed == 0:
+            return None, None, None
+        
+        nss = total_distance / total_time_minutes  # m/min
         IF = nss / css_speed
-        duration_hr = (moving_time / 60)  # moving_time is in minutes
+        duration_hr = (total_time_minutes / 60)  # total_time_minutes is in minutes
         sTSS = (IF ** 3) * duration_hr * 100
-        duration_sec = int(moving_time * 60)
+        duration_sec = int(total_time_minutes * 60)
+        
         return round(sTSS, 2), duration_sec, round(duration_hr, 4)
     except Exception as e:
         logger.error(f"Failed to calculate swim TSS: {e}")
@@ -765,6 +778,44 @@ def calculate_workout_metrics(processed_data: Dict[str, Any], profile: Dict[str,
     return processed_data
 
 
+def calculate_zone_metrics(processed_data: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Calculate zone analysis metrics for workout.
+    Args:
+        processed_data: Processed workout data
+        profile: Athlete profile data
+    Returns:
+        Updated processed data with zone metrics
+    """
+    workout_type = processed_data.get("workout_type")
+    trackpoints = processed_data.get("data", [])
+    
+    if not trackpoints:
+        logger.warning(f"No trackpoints available for zone analysis in {processed_data.get('activity_id')}")
+        return processed_data
+    
+    try:
+        # Use the zone analysis agent to calculate zone metrics
+        zone_data = analyze_workout_zones(trackpoints, profile, workout_type)
+        
+        # Add zone data to processed data
+        processed_data["zone_analysis"] = zone_data
+        
+        logger.info(f"Zone analysis completed for {workout_type} workout {processed_data.get('activity_id')}")
+        
+    except Exception as e:
+        logger.error(f"Zone analysis failed for {processed_data.get('activity_id')}: {e}")
+        # Add empty zone data as fallback
+        processed_data["zone_analysis"] = {
+            "heart_rate_zones": {"z1_minutes": 0, "z2_minutes": 0, "zx_minutes": 0, "z3_minutes": 0, "zy_minutes": 0, "z4_minutes": 0, "z5_minutes": 0},
+            "power_zones": {"z1_minutes": 0, "z2_minutes": 0, "zx_minutes": 0, "z3_minutes": 0, "zy_minutes": 0, "z4_minutes": 0, "z5_minutes": 0},
+            "total_duration_minutes": 0,
+            "zones_available": {"heart_rate": False, "power": False}
+        }
+    
+    return processed_data
+
+
 def process_downloaded_files(date_dir: Path):
     """
     Process all downloaded workout files in a date directory.
@@ -792,6 +843,9 @@ def process_downloaded_files(date_dir: Path):
         
         # Calculate metrics
         processed_data = calculate_workout_metrics(processed_data, profile)
+        
+        # Calculate zone metrics
+        processed_data = calculate_zone_metrics(processed_data, profile)
         
         # Save processed data
         base = tcx_path.stem

@@ -985,4 +985,188 @@ body.modal-open {
 .pmc-chart-container svg {
   max-width: 100%;
   height: auto;
+}
+
+.pmc-subtitle {
+  text-align: center;
+  color: #64748b;
+  font-size: 14px;
+  margin: 0 0 20px 0;
+}
+
+.pmc-chart-wrapper {
+  position: relative;
+  cursor: crosshair;
+}
+
+/* PMC Tooltip Styles */
+.pmc-tooltip {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  padding: 12px;
+  font-size: 12px;
+  min-width: 200px;
+  z-index: 1000;
+  pointer-events: none;
+}
+
+.tooltip-header {
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.tooltip-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tooltip-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.tooltip-label {
+  color: #64748b;
+  font-weight: 500;
+}
+
+.tooltip-value {
+  color: #374151;
+  font-weight: 600;
+}
+
+.tooltip-value.positive {
+  color: #059669;
+}
+
+.tooltip-value.negative {
+  color: #dc2626;
+}
+
+/* PMC Interactive Controls */
+.pmc-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 20px;
+  padding: 20px;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e2e8f0;
+}
+
+.metric-selector, .timeframe-selector {
+  flex: 1;
+}
+
+.metric-selector h4, .timeframe-selector h4 {
+  margin: 0 0 10px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.metric-buttons, .timeframe-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.metric-btn, .timeframe-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: white;
+  color: #374151;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.metric-btn:hover, .timeframe-btn:hover {
+  background: #f9fafb;
+  border-color: #9ca3af;
+}
+
+.metric-btn.active, .timeframe-btn.active {
+  background: #3b82f6;
+  color: white;
+  border-color: #3b82f6;
+}
+
+.metric-color {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+/* PMC Data Table */
+.pmc-data-table {
+  margin-top: 30px;
+  padding: 20px;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e2e8f0;
+}
+
+.pmc-data-table h4 {
+  margin: 0 0 15px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.table-container {
+  overflow-x: auto;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.pmc-data-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.pmc-data-table th,
+.pmc-data-table td {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.pmc-data-table th {
+  background: #f9fafb;
+  font-weight: 600;
+  color: #374151;
+  position: sticky;
+  top: 0;
+}
+
+.pmc-data-table td {
+  color: #6b7280;
+}
+
+.pmc-data-table td.positive {
+  color: #059669;
+  font-weight: 600;
+}
+
+.pmc-data-table td.negative {
+  color: #dc2626;
+  font-weight: 600;
 } 

@@ -730,8 +730,18 @@ function SimpleWorkoutPlot({ data }) {
   );
 }
 
-// PMC Chart component - Professional Performance Management Chart
+// PMC Chart component - Interactive Performance Management Chart
 function PMCChart({ pmcData, workoutsData }) {
+  const [hoverData, setHoverData] = useState(null);
+  const [hoverPosition, setHoverPosition] = useState({ x: 0, y: 0 });
+  const [selectedMetrics, setSelectedMetrics] = useState({
+    ctl: true,
+    atl: true,
+    tsb: true,
+    dailyTss: true
+  });
+  const [timeframe, setTimeframe] = useState(30); // days
+
   if (!pmcData || pmcData.length === 0) {
     return (
       <div className="pmc-chart-container">
@@ -740,9 +750,20 @@ function PMCChart({ pmcData, workoutsData }) {
     );
   }
 
-  const width = 800;
-  const height = 400;
-  const padding = { top: 40, right: 80, bottom: 60, left: 60 };
+  // Dynamic axis calculation based on selected metrics
+  const needsTssAxis = selectedMetrics.ctl || selectedMetrics.atl || selectedMetrics.dailyTss;
+  const needsTsbAxis = selectedMetrics.tsb;
+  
+  // Dynamic padding based on axes needed
+  const padding = {
+    top: 50,
+    right: needsTsbAxis ? 100 : 40,
+    bottom: 80,
+    left: needsTssAxis ? 80 : 40
+  };
+  
+  const width = 900;
+  const height = 450;
   const chartWidth = width - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
 
@@ -751,14 +772,24 @@ function PMCChart({ pmcData, workoutsData }) {
   const minDate = new Date(Math.min(...dates));
   const maxDate = new Date(Math.max(...dates));
   
-  // Calculate ranges for dual Y-axes
+  // Calculate ranges for selected metrics
   const ctlValues = pmcData.map(d => d.ctl);
   const atlValues = pmcData.map(d => d.atl);
   const tsbValues = pmcData.map(d => d.tsb);
+  const workoutTssValues = workoutsData ? workoutsData.map(w => w.tss) : [];
   
-  const maxTSS = Math.max(...ctlValues, ...atlValues, 100); // Ensure minimum range
-  const minTSB = Math.min(...tsbValues, -20); // Ensure negative range
-  const maxTSB = Math.max(...tsbValues, 20);  // Ensure positive range
+  // Dynamic TSS range calculation
+  const getTssRange = () => {
+    const values = [];
+    if (selectedMetrics.ctl) values.push(...ctlValues);
+    if (selectedMetrics.atl) values.push(...atlValues);
+    if (selectedMetrics.dailyTss) values.push(...workoutTssValues);
+    return Math.max(...values, 100); // Ensure minimum range
+  };
+  
+  const maxTSS = getTssRange();
+  const minTSB = Math.min(...tsbValues, -20);
+  const maxTSB = Math.max(...tsbValues, 20);
 
   // Scale functions
   const scaleX = x => padding.left + ((x - minDate) / (maxDate - minDate)) * chartWidth;
@@ -767,10 +798,15 @@ function PMCChart({ pmcData, workoutsData }) {
 
   // Format date for display
   const formatDate = (date) => {
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    return date.toLocaleDateString('en-US', { 
+      weekday: 'short', 
+      month: 'short', 
+      day: 'numeric',
+      year: 'numeric'
+    });
   };
 
-  // Create paths for each metric
+  // Create paths for each metric (only if selected)
   const createPath = (data, scaleY, key) => {
     return data.map((d, i) => {
       const x = scaleX(new Date(d.date));
@@ -779,214 +815,476 @@ function PMCChart({ pmcData, workoutsData }) {
     }).join(' ');
   };
 
-  const ctlPath = createPath(pmcData, scaleYTSS, 'ctl');
-  const atlPath = createPath(pmcData, scaleYTSS, 'atl');
-  const tsbPath = createPath(pmcData, scaleYTSB, 'tsb');
+  const ctlPath = selectedMetrics.ctl ? createPath(pmcData, scaleYTSS, 'ctl') : '';
+  const atlPath = selectedMetrics.atl ? createPath(pmcData, scaleYTSS, 'atl') : '';
+  const tsbPath = selectedMetrics.tsb ? createPath(pmcData, scaleYTSB, 'tsb') : '';
 
-  // Create workout scatter points
-  const workoutPoints = workoutsData ? workoutsData.map(w => ({
+  // Create workout scatter points (only if selected)
+  const workoutPoints = (selectedMetrics.dailyTss && workoutsData) ? workoutsData.map(w => ({
     x: scaleX(new Date(w.date)),
     y: scaleYTSS(w.tss),
     tss: w.tss,
     date: w.date
   })) : [];
 
-  // Generate Y-axis labels
-  const tssLabels = [0, 50, 100, 150, 200, 250, 300];
-  const tsbLabels = [-60, -40, -20, 0, 20, 40, 60];
+  // Generate Y-axis labels with proper intervals
+  const tssLabels = [0, 20, 40, 60, 80, 100, 120, 140, 150, 200, 250, 300];
+  const tsbLabels = [-60, -50, -40, -30, -20, -10, 0, 10, 20, 30, 40, 50, 60];
+
+  // Handle mouse events for interactivity
+  const handleMouseMove = (event) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    
+    // Find closest data point
+    let closestData = null;
+    let minDistance = Infinity;
+    
+    pmcData.forEach(d => {
+      const dataX = scaleX(new Date(d.date));
+      const distance = Math.abs(x - dataX);
+      if (distance < minDistance && distance < 20) {
+        minDistance = distance;
+        closestData = d;
+      }
+    });
+    
+    if (closestData) {
+      setHoverData(closestData);
+      setHoverPosition({ x: event.clientX, y: event.clientY });
+    } else {
+      setHoverData(null);
+    }
+  };
+
+  const handleMouseLeave = () => {
+    setHoverData(null);
+  };
+
+  // Metric selection handlers
+  const handleMetricToggle = (metric) => {
+    setSelectedMetrics(prev => ({
+      ...prev,
+      [metric]: !prev[metric]
+    }));
+  };
+
+  // Timeframe options
+  const timeframeOptions = [7, 14, 30, 60, 90];
 
   return (
     <div className="pmc-chart-container">
-      <h3>Performance Management Chart</h3>
-      <svg width={width} height={height} style={{ background: 'white', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
-        {/* Grid lines for TSS */}
-        {tssLabels.map(tss => {
-          const y = scaleYTSS(tss);
-          return (
-            <line
-              key={`grid-tss-${tss}`}
-              x1={padding.left}
-              y1={y}
-              x2={width - padding.right}
-              y2={y}
-              stroke="#f1f5f9"
-              strokeWidth="1"
+      <h3>Performance Management - All Workout Types</h3>
+      
+      {/* Interactive Controls */}
+      <div className="pmc-controls">
+        <div className="metric-selector">
+          <h4>Select Metrics:</h4>
+          <div className="metric-buttons">
+            <button
+              className={`metric-btn ${selectedMetrics.ctl ? 'active' : ''}`}
+              onClick={() => handleMetricToggle('ctl')}
+            >
+              <span className="metric-color" style={{backgroundColor: '#374151'}}></span>
+              CTL (Fitness)
+            </button>
+            <button
+              className={`metric-btn ${selectedMetrics.atl ? 'active' : ''}`}
+              onClick={() => handleMetricToggle('atl')}
+            >
+              <span className="metric-color" style={{backgroundColor: '#f97316'}}></span>
+              ATL (Fatigue)
+            </button>
+            <button
+              className={`metric-btn ${selectedMetrics.tsb ? 'active' : ''}`}
+              onClick={() => handleMetricToggle('tsb')}
+            >
+              <span className="metric-color" style={{backgroundColor: '#ec4899'}}></span>
+              TSB (Form)
+            </button>
+            <button
+              className={`metric-btn ${selectedMetrics.dailyTss ? 'active' : ''}`}
+              onClick={() => handleMetricToggle('dailyTss')}
+            >
+              <span className="metric-color" style={{backgroundColor: '#3b82f6'}}></span>
+              Daily TSS
+            </button>
+          </div>
+        </div>
+        
+        <div className="timeframe-selector">
+          <h4>Timeframe:</h4>
+          <div className="timeframe-buttons">
+            {timeframeOptions.map(days => (
+              <button
+                key={days}
+                className={`timeframe-btn ${timeframe === days ? 'active' : ''}`}
+                onClick={() => setTimeframe(days)}
+              >
+                {days} days
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+      
+      <div className="pmc-chart-wrapper" 
+           onMouseMove={handleMouseMove} 
+           onMouseLeave={handleMouseLeave}>
+        <svg width={width} height={height} style={{ background: 'white', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
+          {/* Grid lines for TSS (only if TSS axis is needed) */}
+          {needsTssAxis && tssLabels.map(tss => {
+            const y = scaleYTSS(tss);
+            return (
+              <line
+                key={`grid-tss-${tss}`}
+                x1={padding.left}
+                y1={y}
+                x2={width - padding.right}
+                y2={y}
+                stroke="#f1f5f9"
+                strokeWidth="1"
+              />
+            );
+          })}
+
+          {/* Grid lines for TSB (only if TSB axis is needed) */}
+          {needsTsbAxis && tsbLabels.map(tsb => {
+            const y = scaleYTSB(tsb);
+            return (
+              <line
+                key={`grid-tsb-${tsb}`}
+                x1={padding.left}
+                y1={y}
+                x2={width - padding.right}
+                y2={y}
+                stroke="#f1f5f9"
+                strokeWidth="1"
+                strokeDasharray="2,2"
+              />
+            );
+          })}
+
+          {/* CTL line with shaded area (only if selected) */}
+          {selectedMetrics.ctl && (
+            <>
+              <defs>
+                <linearGradient id="ctlGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%" stopColor="#374151" stopOpacity="0.3"/>
+                  <stop offset="100%" stopColor="#374151" stopOpacity="0.1"/>
+                </linearGradient>
+              </defs>
+              
+              {/* CTL shaded area */}
+              <path
+                d={`${ctlPath} L ${scaleX(maxDate)} ${scaleYTSS(0)} L ${scaleX(minDate)} ${scaleYTSS(0)} Z`}
+                fill="url(#ctlGradient)"
+              />
+              
+              {/* CTL line */}
+              <path
+                d={ctlPath}
+                fill="none"
+                stroke="#374151"
+                strokeWidth="3"
+              />
+            </>
+          )}
+
+          {/* ATL line (only if selected) */}
+          {selectedMetrics.atl && (
+            <path
+              d={atlPath}
+              fill="none"
+              stroke="#f97316"
+              strokeWidth="2"
             />
-          );
-        })}
+          )}
 
-        {/* CTL line with shaded area */}
-        <defs>
-          <linearGradient id="ctlGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stopColor="#374151" stopOpacity="0.3"/>
-            <stop offset="100%" stopColor="#374151" stopOpacity="0.1"/>
-          </linearGradient>
-        </defs>
-        
-        {/* CTL shaded area */}
-        <path
-          d={`${ctlPath} L ${scaleX(maxDate)} ${scaleYTSS(0)} L ${scaleX(minDate)} ${scaleYTSS(0)} Z`}
-          fill="url(#ctlGradient)"
-        />
-        
-        {/* CTL line */}
-        <path
-          d={ctlPath}
-          fill="none"
-          stroke="#374151"
-          strokeWidth="3"
-        />
+          {/* TSB line (only if selected) */}
+          {selectedMetrics.tsb && (
+            <path
+              d={tsbPath}
+              fill="none"
+              stroke="#ec4899"
+              strokeWidth="2"
+            />
+          )}
 
-        {/* ATL line */}
-        <path
-          d={atlPath}
-          fill="none"
-          stroke="#f97316"
-          strokeWidth="2"
-        />
+          {/* Workout scatter points (only if selected) */}
+          {selectedMetrics.dailyTss && workoutPoints.map((point, i) => (
+            <circle
+              key={`workout-${i}`}
+              cx={point.x}
+              cy={point.y}
+              r="3"
+              fill="#3b82f6"
+              opacity="0.7"
+            />
+          ))}
 
-        {/* TSB line */}
-        <path
-          d={tsbPath}
-          fill="none"
-          stroke="#ec4899"
-          strokeWidth="2"
-        />
-
-        {/* Workout scatter points */}
-        {workoutPoints.map((point, i) => (
-          <circle
-            key={`workout-${i}`}
-            cx={point.x}
-            cy={point.y}
-            r="3"
-            fill="#3b82f6"
-            opacity="0.7"
+          {/* X-axis */}
+          <line
+            x1={padding.left}
+            y1={height - padding.bottom}
+            x2={width - padding.right}
+            y2={height - padding.bottom}
+            stroke="#64748b"
+            strokeWidth="2"
           />
-        ))}
 
-        {/* X-axis */}
-        <line
-          x1={padding.left}
-          y1={height - padding.bottom}
-          x2={width - padding.right}
-          y2={height - padding.bottom}
-          stroke="#64748b"
-          strokeWidth="2"
-        />
+          {/* X-axis labels - one per day */}
+          {pmcData.map((d, i) => {
+            const x = scaleX(new Date(d.date));
+            return (
+              <text
+                key={`x-label-${i}`}
+                x={x}
+                y={height - padding.bottom + 25}
+                textAnchor="middle"
+                fontSize="10"
+                fill="#64748b"
+                transform={`rotate(-45, ${x}, ${height - padding.bottom + 25})`}
+              >
+                {formatDate(new Date(d.date))}
+              </text>
+            );
+          })}
 
-        {/* X-axis labels */}
-        {pmcData.filter((_, i) => i % 3 === 0 || i === pmcData.length - 1).map((d, i) => {
-          const x = scaleX(new Date(d.date));
-          return (
-            <text
-              key={`x-label-${i}`}
-              x={x}
-              y={height - padding.bottom + 20}
-              textAnchor="middle"
-              fontSize="10"
-              fill="#64748b"
-              transform={`rotate(-45, ${x}, ${height - padding.bottom + 20})`}
-            >
-              {formatDate(new Date(d.date))}
-            </text>
-          );
-        })}
+          {/* Left Y-axis (TSS) - only if needed */}
+          {needsTssAxis && (
+            <>
+              <line
+                x1={padding.left}
+                y1={padding.top}
+                x2={padding.left}
+                y2={height - padding.bottom}
+                stroke="#64748b"
+                strokeWidth="2"
+              />
 
-        {/* Left Y-axis (TSS) */}
-        <line
-          x1={padding.left}
-          y1={padding.top}
-          x2={padding.left}
-          y2={height - padding.bottom}
-          stroke="#64748b"
-          strokeWidth="2"
-        />
+              {/* Left Y-axis labels */}
+              {tssLabels.map(tss => {
+                const y = scaleYTSS(tss);
+                return (
+                  <text
+                    key={`y-tss-${tss}`}
+                    x={padding.left - 15}
+                    y={y + 4}
+                    textAnchor="end"
+                    fontSize="11"
+                    fill="#64748b"
+                  >
+                    {tss}
+                  </text>
+                );
+              })}
 
-        {/* Left Y-axis labels */}
-        {tssLabels.map(tss => {
-          const y = scaleYTSS(tss);
-          return (
-            <text
-              key={`y-tss-${tss}`}
-              x={padding.left - 10}
-              y={y + 4}
-              textAnchor="end"
-              fontSize="10"
-              fill="#64748b"
-            >
-              {tss}
-            </text>
-          );
-        })}
+              {/* TSS Axis title */}
+              <text
+                x={padding.left - 40}
+                y={height / 2}
+                textAnchor="middle"
+                transform={`rotate(-90, ${padding.left - 40}, ${height / 2})`}
+                fontSize="14"
+                fill="#374151"
+                fontWeight="600"
+              >
+                TSS/d
+              </text>
+            </>
+          )}
 
-        {/* Right Y-axis (TSB) */}
-        <line
-          x1={width - padding.right}
-          y1={padding.top}
-          x2={width - padding.right}
-          y2={height - padding.bottom}
-          stroke="#64748b"
-          strokeWidth="2"
-        />
+          {/* Right Y-axis (TSB) - only if needed */}
+          {needsTsbAxis && (
+            <>
+              <line
+                x1={width - padding.right}
+                y1={padding.top}
+                x2={width - padding.right}
+                y2={height - padding.bottom}
+                stroke="#64748b"
+                strokeWidth="2"
+              />
 
-        {/* Right Y-axis labels */}
-        {tsbLabels.map(tsb => {
-          const y = scaleYTSB(tsb);
-          return (
-            <text
-              key={`y-tsb-${tsb}`}
-              x={width - padding.right + 10}
-              y={y + 4}
-              textAnchor="start"
-              fontSize="10"
-              fill="#64748b"
-            >
-              {tsb}
-            </text>
-          );
-        })}
+              {/* Right Y-axis labels */}
+              {tsbLabels.map(tsb => {
+                const y = scaleYTSB(tsb);
+                return (
+                  <text
+                    key={`y-tsb-${tsb}`}
+                    x={width - padding.right + 15}
+                    y={y + 4}
+                    textAnchor="start"
+                    fontSize="11"
+                    fill="#64748b"
+                  >
+                    {tsb}
+                  </text>
+                );
+              })}
 
-        {/* Axis titles */}
-        <text
-          x={padding.left - 30}
-          y={height / 2}
-          textAnchor="middle"
-          transform={`rotate(-90, ${padding.left - 30}, ${height / 2})`}
-          fontSize="12"
-          fill="#374151"
-          fontWeight="600"
-        >
-          TSS/d
-        </text>
+              {/* TSB Axis title */}
+              <text
+                x={width - padding.right + 40}
+                y={height / 2}
+                textAnchor="middle"
+                transform={`rotate(90, ${width - padding.right + 40}, ${height / 2})`}
+                fontSize="14"
+                fill="#374151"
+                fontWeight="600"
+              >
+                Form (TSB)
+              </text>
+            </>
+          )}
 
-        <text
-          x={width - padding.right + 30}
-          y={height / 2}
-          textAnchor="middle"
-          transform={`rotate(90, ${width - padding.right + 30}, ${height / 2})`}
-          fontSize="12"
-          fill="#374151"
-          fontWeight="600"
-        >
-          Form (TSB)
-        </text>
+          {/* Legend - only show selected metrics */}
+          <g transform={`translate(${padding.left}, ${padding.top - 30})`}>
+            {selectedMetrics.ctl && (
+              <>
+                <circle cx="0" cy="0" r="4" fill="#374151"/>
+                <text x="15" y="4" fontSize="11" fill="#374151" fontWeight="500">CTL</text>
+              </>
+            )}
+            
+            {selectedMetrics.atl && (
+              <>
+                <circle cx={selectedMetrics.ctl ? "80" : "0"} cy="0" r="4" fill="#f97316"/>
+                <text x={selectedMetrics.ctl ? "95" : "15"} y="4" fontSize="11" fill="#f97316" fontWeight="500">ATL</text>
+              </>
+            )}
+            
+            {selectedMetrics.tsb && (
+              <>
+                <circle cx={selectedMetrics.ctl && selectedMetrics.atl ? "160" : selectedMetrics.ctl || selectedMetrics.atl ? "80" : "0"} cy="0" r="4" fill="#ec4899"/>
+                <text x={selectedMetrics.ctl && selectedMetrics.atl ? "175" : selectedMetrics.ctl || selectedMetrics.atl ? "95" : "15"} y="4" fontSize="11" fill="#ec4899" fontWeight="500">TSB</text>
+              </>
+            )}
+            
+            {selectedMetrics.dailyTss && (
+              <>
+                <circle cx={selectedMetrics.ctl && selectedMetrics.atl && selectedMetrics.tsb ? "240" : selectedMetrics.ctl && selectedMetrics.atl ? "160" : selectedMetrics.ctl || selectedMetrics.atl ? "80" : "0"} cy="0" r="3" fill="#3b82f6" opacity="0.7"/>
+                <text x={selectedMetrics.ctl && selectedMetrics.atl && selectedMetrics.tsb ? "255" : selectedMetrics.ctl && selectedMetrics.atl ? "175" : selectedMetrics.ctl || selectedMetrics.atl ? "95" : "15"} y="4" fontSize="11" fill="#3b82f6" fontWeight="500">Daily TSS</text>
+              </>
+            )}
+          </g>
 
-        {/* Legend */}
-        <g transform={`translate(${padding.left}, ${padding.top - 20})`}>
-          <circle cx="0" cy="0" r="4" fill="#374151"/>
-          <text x="15" y="4" fontSize="10" fill="#374151">CTL</text>
-          
-          <circle cx="80" cy="0" r="4" fill="#f97316"/>
-          <text x="95" y="4" fontSize="10" fill="#f97316">ATL</text>
-          
-          <circle cx="140" cy="0" r="4" fill="#ec4899"/>
-          <text x="155" y="4" fontSize="10" fill="#ec4899">TSB</text>
-          
-          <circle cx="200" cy="0" r="3" fill="#3b82f6" opacity="0.7"/>
-          <text x="215" y="4" fontSize="10" fill="#3b82f6">Daily TSS</text>
-        </g>
-      </svg>
+          {/* Hover indicator line */}
+          {hoverData && (
+            <line
+              x1={scaleX(new Date(hoverData.date))}
+              y1={padding.top}
+              x2={scaleX(new Date(hoverData.date))}
+              y2={height - padding.bottom}
+              stroke="#64748b"
+              strokeWidth="1"
+              strokeDasharray="3,3"
+            />
+          )}
+        </svg>
+
+        {/* Hover tooltip */}
+        {hoverData && (
+          <div 
+            className="pmc-tooltip"
+            style={{
+              position: 'absolute',
+              left: hoverPosition.x + 10,
+              top: hoverPosition.y - 10,
+              transform: 'translateY(-50%)'
+            }}
+          >
+            <div className="tooltip-header">
+              {formatDate(new Date(hoverData.date))}
+            </div>
+            <div className="tooltip-content">
+              {selectedMetrics.ctl && (
+                <div className="tooltip-row">
+                  <span className="tooltip-label">Fitness (CTL):</span>
+                  <span className="tooltip-value">{Math.round(hoverData.ctl)}</span>
+                </div>
+              )}
+              {selectedMetrics.atl && (
+                <div className="tooltip-row">
+                  <span className="tooltip-label">Fatigue (ATL):</span>
+                  <span className="tooltip-value">{Math.round(hoverData.atl)}</span>
+                </div>
+              )}
+              {selectedMetrics.tsb && (
+                <div className="tooltip-row">
+                  <span className="tooltip-label">Form (TSB):</span>
+                  <span className={`tooltip-value ${hoverData.tsb > 0 ? 'positive' : 'negative'}`}>
+                    {Math.round(hoverData.tsb)}
+                  </span>
+                </div>
+              )}
+              {selectedMetrics.dailyTss && (
+                <div className="tooltip-row">
+                  <span className="tooltip-label">Daily TSS:</span>
+                  <span className="tooltip-value">
+                    {workoutsData?.find(w => w.date === hoverData.date)?.tss || 'N/A'}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+      
+      {/* Tabular Data View for Debugging */}
+      <PMCDataTable 
+        pmcData={pmcData} 
+        workoutsData={workoutsData} 
+        selectedMetrics={selectedMetrics}
+      />
+    </div>
+  );
+}
+
+// PMC Data Table Component
+function PMCDataTable({ pmcData, workoutsData, selectedMetrics }) {
+  if (!pmcData || pmcData.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="pmc-data-table">
+      <h4>Data Table (Debug View)</h4>
+      <div className="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              {selectedMetrics.ctl && <th>CTL</th>}
+              {selectedMetrics.atl && <th>ATL</th>}
+              {selectedMetrics.tsb && <th>TSB</th>}
+              {selectedMetrics.dailyTss && <th>Daily TSS</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {pmcData.map((data, index) => {
+              const workout = workoutsData?.find(w => w.date === data.date);
+              return (
+                <tr key={index}>
+                  <td>{new Date(data.date).toLocaleDateString()}</td>
+                  {selectedMetrics.ctl && <td>{Math.round(data.ctl)}</td>}
+                  {selectedMetrics.atl && <td>{Math.round(data.atl)}</td>}
+                  {selectedMetrics.tsb && (
+                    <td className={data.tsb > 0 ? 'positive' : 'negative'}>
+                      {Math.round(data.tsb)}
+                    </td>
+                  )}
+                  {selectedMetrics.dailyTss && (
+                    <td>{workout ? Math.round(workout.tss) : 'N/A'}</td>
+                  )}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -1222,7 +1520,7 @@ function PMCDashboard() {
     setLoading(true);
     setError(null);
     
-    // Calculate date range based on week offset
+    // Calculate date range based on week offset and timeframe
     const today = new Date();
     const startDate = new Date(today);
     startDate.setDate(today.getDate() + (weekOffset * 7) - 30);
