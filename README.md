@@ -2,6 +2,8 @@
 
 > **Your AI-powered triathlon training companion**
 >
+> <img width="1842" height="782" alt="image" src="https://github.com/user-attachments/assets/a6ea31dc-6d68-498b-9186-f14f7d9b96d8" />
+
 > <img width="1481" height="813" alt="image" src="https://github.com/user-attachments/assets/7739d1fa-bfe0-447f-8107-df175a396547" />
 
 
