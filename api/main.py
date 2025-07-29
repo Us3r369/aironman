@@ -565,6 +565,140 @@ def get_workout_detail(workout_id: str):
                 json_file=row[5],
             )
 
+# --- Zone Analysis Models ---
+class ZoneData(BaseModel):
+    z1_minutes: float
+    z2_minutes: float
+    zx_minutes: float
+    z3_minutes: float
+    zy_minutes: float
+    z4_minutes: float
+    z5_minutes: float
+
+class ZonesAvailable(BaseModel):
+    heart_rate: bool
+    power: bool
+
+class WorkoutZoneAnalysis(BaseModel):
+    heart_rate_zones: ZoneData
+    power_zones: ZoneData
+    total_duration_minutes: float
+    zones_available: ZonesAvailable
+
+@app.get("/api/workouts/{workout_id}/zones", response_model=WorkoutZoneAnalysis)
+def get_workout_zones(workout_id: str):
+    """Get zone analysis data for a specific workout."""
+    from services.zone_database import get_workout_zones
+    
+    zone_data = get_workout_zones(workout_id)
+    if not zone_data:
+        raise HTTPException(status_code=404, detail="Zone analysis not found for this workout")
+    
+    return WorkoutZoneAnalysis(
+        heart_rate_zones=ZoneData(**zone_data["heart_rate_zones"]),
+        power_zones=ZoneData(**zone_data["power_zones"]),
+        total_duration_minutes=zone_data["total_duration_minutes"],
+        zones_available=ZonesAvailable(**zone_data["zones_available"])
+    )
+
+# --- Zone Definitions Models ---
+class ZoneRange(BaseModel):
+    lower: int
+    upper: int
+
+class HeartRateZones(BaseModel):
+    z1: ZoneRange
+    z2: ZoneRange
+    zx: ZoneRange
+    z3: ZoneRange
+    zy: ZoneRange
+    z4: ZoneRange
+    z5: ZoneRange
+
+class PowerZones(BaseModel):
+    z1: ZoneRange
+    z2: ZoneRange
+    zx: ZoneRange
+    z3: ZoneRange
+    zy: ZoneRange
+    z4: ZoneRange
+    z5: ZoneRange
+
+class ZoneDefinitions(BaseModel):
+    heart_rate: HeartRateZones
+    power: Optional[PowerZones] = None
+
+@app.get("/api/athlete/{athlete_id}/zones", response_model=ZoneDefinitions)
+def get_athlete_zones(athlete_id: str):
+    """Get the latest zone definitions for an athlete."""
+    try:
+        athlete_uuid = get_athlete_uuid(athlete_id)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Athlete not found: {e}")
+    
+    with get_db_conn() as conn:
+        with conn.cursor() as cur:
+            # Get the latest athlete profile (most recent valid_from)
+            cur.execute("""
+                SELECT 
+                    hr_zone_z1_lower, hr_zone_z1_upper,
+                    hr_zone_z2_lower, hr_zone_z2_upper,
+                    hr_zone_zx_lower, hr_zone_zx_upper,
+                    hr_zone_z3_lower, hr_zone_z3_upper,
+                    hr_zone_zy_lower, hr_zone_zy_upper,
+                    hr_zone_z4_lower, hr_zone_z4_upper,
+                    hr_zone_z5_lower, hr_zone_z5_upper,
+                    bike_power_zone_z1_lower, bike_power_zone_z1_upper,
+                    bike_power_zone_z2_lower, bike_power_zone_z2_upper,
+                    bike_power_zone_zx_lower, bike_power_zone_zx_upper,
+                    bike_power_zone_z3_lower, bike_power_zone_z3_upper,
+                    bike_power_zone_zy_lower, bike_power_zone_zy_upper,
+                    bike_power_zone_z4_lower, bike_power_zone_z4_upper,
+                    bike_power_zone_z5_lower, bike_power_zone_z5_upper,
+                    run_power_zone_z1_lower, run_power_zone_z1_upper,
+                    run_power_zone_z2_lower, run_power_zone_z2_upper,
+                    run_power_zone_zx_lower, run_power_zone_zx_upper,
+                    run_power_zone_z3_lower, run_power_zone_z3_upper,
+                    run_power_zone_zy_lower, run_power_zone_zy_upper,
+                    run_power_zone_z4_lower, run_power_zone_z4_upper,
+                    run_power_zone_z5_lower, run_power_zone_z5_upper
+                FROM athlete_profile 
+                WHERE athlete_id = %s 
+                ORDER BY valid_from DESC 
+                LIMIT 1
+            """, (athlete_uuid,))
+            
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="No athlete profile found")
+            
+            # Extract heart rate zones
+            hr_zones = HeartRateZones(
+                z1=ZoneRange(lower=row[0], upper=row[1]),
+                z2=ZoneRange(lower=row[2], upper=row[3]),
+                zx=ZoneRange(lower=row[4], upper=row[5]),
+                z3=ZoneRange(lower=row[6], upper=row[7]),
+                zy=ZoneRange(lower=row[8], upper=row[9]),
+                z4=ZoneRange(lower=row[10], upper=row[11]),
+                z5=ZoneRange(lower=row[12], upper=row[13])
+            )
+            
+            # Extract power zones (bike and run are the same for now, using bike zones)
+            power_zones = PowerZones(
+                z1=ZoneRange(lower=row[14], upper=row[15]),
+                z2=ZoneRange(lower=row[16], upper=row[17]),
+                zx=ZoneRange(lower=row[18], upper=row[19]),
+                z3=ZoneRange(lower=row[20], upper=row[21]),
+                zy=ZoneRange(lower=row[22], upper=row[23]),
+                z4=ZoneRange(lower=row[24], upper=row[25]),
+                z5=ZoneRange(lower=row[26], upper=row[27])
+            )
+            
+            return ZoneDefinitions(
+                heart_rate=hr_zones,
+                power=power_zones
+            )
+
 # --- Health and Recovery Analysis Endpoints ---
 
 class HealthMetricData(BaseModel):

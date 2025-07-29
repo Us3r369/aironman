@@ -11,7 +11,7 @@ function Sidebar({ selectedItem, onItemSelect }) {
           className={`sidebar-item ${selectedItem === 'pmc' ? 'active' : ''}`}
           onClick={() => onItemSelect('pmc')}
         >
-          📈 Performance Chart
+          Performance Chart
         </li>
         <li 
           className={`sidebar-item ${selectedItem === 'sync' ? 'active' : ''}`}
@@ -471,6 +471,10 @@ function WorkoutsView() {
   const [workoutDetail, setWorkoutDetail] = useState(null);
   const [athleteId, setAthleteId] = useState("");
   const [weekOffset, setWeekOffset] = useState(0); // 0 = current week, -1 = previous week, etc.
+  const [zoneData, setZoneData] = useState(null);
+  const [zoneLoading, setZoneLoading] = useState(false);
+  const [zoneDefinitions, setZoneDefinitions] = useState(null);
+  const [zoneDefsLoading, setZoneDefsLoading] = useState(false);
 
   // Fetch athleteId from profile (assume single athlete for now)
   useEffect(() => {
@@ -511,12 +515,34 @@ function WorkoutsView() {
       });
   }, [athleteId, weekOffset]);
 
+  // Fetch zone definitions when athleteId is available
+  useEffect(() => {
+    if (!athleteId) return;
+    setZoneDefsLoading(true);
+    fetch(`http://localhost:8000/api/athlete/${athleteId}/zones`)
+      .then(res => {
+        if (!res.ok) throw new Error('Failed to fetch zone definitions');
+        return res.json();
+      })
+      .then(data => {
+        setZoneDefinitions(data);
+        setZoneDefsLoading(false);
+      })
+      .catch(err => {
+        console.warn('Zone definitions not available:', err.message);
+        setZoneDefsLoading(false);
+      });
+  }, [athleteId]);
+
   // Fetch workout detail when selected
   useEffect(() => {
     if (!selectedWorkout) return;
     setDetailLoading(true);
     setDetailError(null);
     setWorkoutDetail(null);
+    setZoneData(null);
+    
+    // Fetch workout detail
     fetch(`http://localhost:8000/api/workouts/${selectedWorkout}`)
       .then(res => {
         if (!res.ok) throw new Error('Failed to fetch workout detail');
@@ -525,6 +551,24 @@ function WorkoutsView() {
       .then(data => {
         setWorkoutDetail(data);
         setDetailLoading(false);
+        
+        // Fetch zone data for bike and run workouts
+        if (data.workout_type === 'bike' || data.workout_type === 'run') {
+          setZoneLoading(true);
+          fetch(`http://localhost:8000/api/workouts/${selectedWorkout}/zones`)
+            .then(res => {
+              if (!res.ok) throw new Error('Failed to fetch zone data');
+              return res.json();
+            })
+            .then(zoneData => {
+              setZoneData(zoneData);
+              setZoneLoading(false);
+            })
+            .catch(err => {
+              console.warn('Zone data not available:', err.message);
+              setZoneLoading(false);
+            });
+        }
       })
       .catch(err => {
         setDetailError(err.message);
@@ -655,8 +699,28 @@ function WorkoutsView() {
                 <div><b>Type:</b> {workoutDetail.workout_type}</div>
                 <div><b>Date:</b> {workoutDetail.timestamp}</div>
                 <div><b>TSS:</b> {workoutDetail.tss}</div>
-                {/* Tabular data from json_file if available */}
-                {workoutDetail.json_file && workoutDetail.json_file.data && Array.isArray(workoutDetail.json_file.data) && (
+                
+                {/* Heart Rate Plot for bike and run workouts */}
+                {(workoutDetail.workout_type === 'bike' || workoutDetail.workout_type === 'run') && 
+                 workoutDetail.json_file && workoutDetail.json_file.data && Array.isArray(workoutDetail.json_file.data) && (
+                  <div>
+                    {zoneLoading || zoneDefsLoading ? (
+                      <div className="loading-spinner">Loading zone analysis...</div>
+                    ) : (
+                      <HeartRatePlot 
+                        data={workoutDetail.json_file.data} 
+                        zoneData={zoneData}
+                        workoutType={workoutDetail.workout_type}
+                        zoneDefinitions={zoneDefinitions}
+                      />
+                    )}
+                  </div>
+                )}
+                
+                {/* Tabular data for other workout types or when no heart rate data */}
+                {((workoutDetail.workout_type !== 'bike' && workoutDetail.workout_type !== 'run') || 
+                  !workoutDetail.json_file?.data?.some(d => d.heart_rate)) && 
+                 workoutDetail.json_file && workoutDetail.json_file.data && Array.isArray(workoutDetail.json_file.data) && (
                   <div className="workout-table-container">
                     <h4>Data Points</h4>
                     <table className="workout-detail-table">
@@ -680,10 +744,7 @@ function WorkoutsView() {
                     {workoutDetail.json_file.data.length > 20 && <div>Showing first 20 rows...</div>}
                   </div>
                 )}
-                {/* Optionally, add a simple plot (e.g., time vs. heart_rate or power) */}
-                {workoutDetail.json_file && workoutDetail.json_file.data && Array.isArray(workoutDetail.json_file.data) && (
-                  <SimpleWorkoutPlot data={workoutDetail.json_file.data} />
-                )}
+                
                 {/* Pretty-printed JSON for the full json_file */}
                 {workoutDetail.json_file && (
                   <div className="json-file-block">
@@ -702,30 +763,277 @@ function WorkoutsView() {
   );
 }
 
-// Simple plot using SVG (time vs. heart_rate or power if available)
-function SimpleWorkoutPlot({ data }) {
-  // Try to plot time vs. heart_rate or power
-  const metric = data[0].heart_rate ? 'heart_rate' : (data[0].power ? 'power' : null);
-  if (!metric) return null;
-  // X: index, Y: metric
-  const points = data.slice(0, 100).map((d, i) => [i, d[metric]]).filter(([i, y]) => y !== undefined && y !== null);
-  if (points.length < 2) return null;
-  const width = 300, height = 100;
-  const minY = Math.min(...points.map(p => p[1]));
-  const maxY = Math.max(...points.map(p => p[1]));
-  const scaleY = y => height - ((y - minY) / (maxY - minY + 1e-6)) * height;
-  const scaleX = x => (x / (points.length - 1)) * width;
+// Sophisticated heart rate plot with zone visualization
+function HeartRatePlot({ data, zoneData, workoutType, zoneDefinitions }) {
+  const [hoverData, setHoverData] = useState(null);
+  const [hoverPosition, setHoverPosition] = useState({ x: 0, y: 0 });
+  
+  // Extract heart rate data
+  const hrData = data.filter(d => d.heart_rate !== undefined && d.heart_rate !== null);
+  if (hrData.length < 2) return null;
+  
+  const width = 800;
+  const height = 400;
+  const margin = { top: 40, right: 60, bottom: 60, left: 80 };
+  const plotWidth = width - margin.left - margin.right;
+  const plotHeight = height - margin.top - margin.bottom;
+  
+  // Calculate scales
+  const minHR = Math.min(...hrData.map(d => d.heart_rate));
+  const maxHR = Math.max(...hrData.map(d => d.heart_rate));
+  const hrRange = maxHR - minHR;
+  
+  const scaleY = (hr) => margin.top + plotHeight - ((hr - minHR) / hrRange) * plotHeight;
+  const scaleX = (index) => margin.left + (index / (hrData.length - 1)) * plotWidth;
+  
+  // Zone colors
+  const zoneColors = {
+    z1: '#4ade80', // green
+    z2: '#fbbf24', // yellow
+    zx: '#f97316', // orange
+    z3: '#ef4444', // red
+    zy: '#dc2626', // dark red
+    z4: '#7c2d12', // brown
+    z5: '#581c87'  // purple
+  };
+  
+  // Zone ranges from database (fallback to defaults if not available)
+  const zoneRanges = zoneDefinitions?.heart_rate ? {
+    z1: [zoneDefinitions.heart_rate.z1.lower, zoneDefinitions.heart_rate.z1.upper],
+    z2: [zoneDefinitions.heart_rate.z2.lower, zoneDefinitions.heart_rate.z2.upper],
+    zx: [zoneDefinitions.heart_rate.zx.lower, zoneDefinitions.heart_rate.zx.upper],
+    z3: [zoneDefinitions.heart_rate.z3.lower, zoneDefinitions.heart_rate.z3.upper],
+    zy: [zoneDefinitions.heart_rate.zy.lower, zoneDefinitions.heart_rate.zy.upper],
+    z4: [zoneDefinitions.heart_rate.z4.lower, zoneDefinitions.heart_rate.z4.upper],
+    z5: [zoneDefinitions.heart_rate.z5.lower, zoneDefinitions.heart_rate.z5.upper]
+  } : {
+    z1: [124, 139],
+    z2: [139, 155],
+    zx: [155, 163],
+    z3: [163, 172],
+    zy: [172, 175],
+    z4: [175, 181],
+    z5: [181, 255]
+  };
+  
+  // Create zone background rectangles
+  const zoneBackgrounds = Object.entries(zoneRanges).map(([zone, [min, max]]) => {
+    const y1 = scaleY(max);
+    const y2 = scaleY(min);
+    return (
+      <rect
+        key={zone}
+        x={margin.left}
+        y={y1}
+        width={plotWidth}
+        height={y2 - y1}
+        fill={zoneColors[zone]}
+        opacity={0.2}
+        stroke={zoneColors[zone]}
+        strokeWidth={1}
+      />
+    );
+  });
+  
+  // Create the heart rate line
+  const linePoints = hrData.map((d, i) => `${scaleX(i)},${scaleY(d.heart_rate)}`).join(' ');
+  
+  // Create grid lines
+  const gridLines = [];
+  const hrStep = Math.ceil(hrRange / 10 / 10) * 10; // Round to nearest 10
+  for (let hr = Math.floor(minHR / 10) * 10; hr <= maxHR; hr += hrStep) {
+    const y = scaleY(hr);
+    gridLines.push(
+      <line
+        key={hr}
+        x1={margin.left}
+        y1={y}
+        x2={margin.left + plotWidth}
+        y2={y}
+        stroke="#e5e7eb"
+        strokeWidth={1}
+        opacity={0.5}
+      />
+    );
+  }
+  
+  // Create time grid lines
+  const timeStep = Math.ceil(hrData.length / 10);
+  for (let i = 0; i < hrData.length; i += timeStep) {
+    const x = scaleX(i);
+    gridLines.push(
+      <line
+        key={`time-${i}`}
+        x1={x}
+        y1={margin.top}
+        x2={x}
+        y2={margin.top + plotHeight}
+        stroke="#e5e7eb"
+        strokeWidth={1}
+        opacity={0.5}
+      />
+    );
+  }
+  
+  // Handle mouse events for hover
+  const handleMouseMove = (event) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    
+    // Find closest data point
+    const index = Math.round(((x - margin.left) / plotWidth) * (hrData.length - 1));
+    if (index >= 0 && index < hrData.length) {
+      const dataPoint = hrData[index];
+      setHoverData({
+        index,
+        heartRate: dataPoint.heart_rate,
+        timestamp: dataPoint.timestamp
+      });
+      setHoverPosition({ x: event.clientX, y: event.clientY });
+    }
+  };
+  
+  const handleMouseLeave = () => {
+    setHoverData(null);
+  };
+  
+  // Format time for display
+  const formatTime = (timestamp) => {
+    if (!timestamp) return '';
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString();
+  };
+  
   return (
-    <div className="workout-plot-container">
-      <h4>{metric.replace('_', ' ').toUpperCase()} Plot</h4>
-      <svg width={width} height={height} style={{ background: '#f8f8f8', border: '1px solid #ccc' }}>
-        <polyline
-          fill="none"
-          stroke="#0074d9"
-          strokeWidth="2"
-          points={points.map(([x, y]) => `${scaleX(x)},${scaleY(y)}`).join(' ')}
-        />
-      </svg>
+    <div className="heart-rate-plot-container">
+      <h4>Heart Rate Analysis</h4>
+      <div className="plot-wrapper" style={{ position: 'relative' }}>
+        <svg 
+          width={width} 
+          height={height} 
+          style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px' }}
+          onMouseMove={handleMouseMove}
+          onMouseLeave={handleMouseLeave}
+        >
+          {/* Zone backgrounds */}
+          {zoneBackgrounds}
+          
+          {/* Grid lines */}
+          {gridLines}
+          
+          {/* Heart rate line */}
+          <polyline
+            fill="none"
+            stroke="#1f2937"
+            strokeWidth="2"
+            points={linePoints}
+          />
+          
+          {/* Axis labels */}
+          <text x={width / 2} y={height - 10} textAnchor="middle" fontSize="12" fill="#6b7280">
+            Time
+          </text>
+          <text x={20} y={height / 2} textAnchor="middle" fontSize="12" fill="#6b7280" transform={`rotate(-90, 20, ${height / 2})`}>
+            Heart Rate (bpm)
+          </text>
+          
+          {/* Y-axis tick marks and labels */}
+          {Object.entries(zoneRanges).map(([zone, [min, max]]) => (
+            <g key={`tick-${zone}`}>
+              <line
+                x1={margin.left - 5}
+                y1={scaleY(max)}
+                x2={margin.left}
+                y2={scaleY(max)}
+                stroke="#6b7280"
+                strokeWidth={1}
+              />
+              <text
+                x={margin.left - 10}
+                y={scaleY(max)}
+                textAnchor="end"
+                fontSize="10"
+                fill="#6b7280"
+                dy="0.3em"
+              >
+                {max}
+              </text>
+            </g>
+          ))}
+          
+          {/* Zone labels */}
+          {Object.entries(zoneRanges).map(([zone, [min, max]], index) => {
+            const y = scaleY((min + max) / 2);
+            return (
+              <text
+                key={`label-${zone}`}
+                x={margin.left + plotWidth + 10}
+                y={y}
+                fontSize="12"
+                fill={zoneColors[zone]}
+                fontWeight="bold"
+                dy="0.3em"
+              >
+                {zone.toUpperCase()}
+              </text>
+            );
+          })}
+        </svg>
+        
+        {/* Hover tooltip */}
+        {hoverData && (
+          <div
+            className="hover-tooltip"
+            style={{
+              position: 'absolute',
+              left: hoverPosition.x + 10,
+              top: hoverPosition.y - 10,
+              background: 'rgba(0, 0, 0, 0.8)',
+              color: 'white',
+              padding: '8px 12px',
+              borderRadius: '4px',
+              fontSize: '12px',
+              pointerEvents: 'none',
+              zIndex: 1000,
+              whiteSpace: 'nowrap'
+            }}
+          >
+            <div>Time: {formatTime(hoverData.timestamp)}</div>
+            <div>Heart Rate: {hoverData.heartRate} bpm</div>
+            <div>Point: {hoverData.index + 1}</div>
+          </div>
+        )}
+      </div>
+      
+      {/* Zone summary */}
+      {zoneData && (
+        <div className="zone-summary" style={{ marginTop: '20px', padding: '10px', background: '#f9fafb', borderRadius: '4px' }}>
+          <h5>Zone Summary</h5>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '10px' }}>
+            {Object.entries(zoneData.heart_rate_zones).map(([zone, minutes]) => {
+              if (minutes > 0) {
+                return (
+                  <div key={zone} style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <div
+                      style={{
+                        width: '12px',
+                        height: '12px',
+                        backgroundColor: zoneColors[zone.replace('_minutes', '')],
+                        borderRadius: '2px'
+                      }}
+                    />
+                    <span style={{ fontSize: '12px' }}>
+                      {zone.replace('_minutes', '').toUpperCase()}: {minutes.toFixed(1)} min
+                    </span>
+                  </div>
+                );
+              }
+              return null;
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
