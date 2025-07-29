@@ -108,35 +108,10 @@ def analyze_workout_zones(trackpoints: List[Dict[str, Any]],
     Returns:
         Dictionary with zone analysis results
     """
-    try:
-        task = create_zone_analysis_task(trackpoints, profile, workout_type)
-        crew = Crew(
-            agents=[zone_analysis_agent],
-            tasks=[task],
-            verbose=True,
-        )
-        result = crew.kickoff()
-        
-        # Extract the result string
-        if hasattr(result, 'result'):
-            result_str = result.result
-        else:
-            result_str = str(result)
-        
-        # Parse the JSON result
-        import json
-        try:
-            zone_data = json.loads(result_str)
-            logger.info(f"Zone analysis completed for {workout_type} workout")
-            return zone_data
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse zone analysis result: {e}")
-            logger.error(f"Raw result: {result_str}")
-            return get_fallback_zone_analysis(trackpoints, profile, workout_type)
-            
-    except Exception as e:
-        logger.error(f"Zone analysis failed: {e}")
-        return get_fallback_zone_analysis(trackpoints, profile, workout_type)
+    # For now, use the fallback function directly since the AI agent is not working reliably
+    # TODO: Fix the AI agent prompt and logic
+    logger.info(f"Using fallback zone analysis for {workout_type} workout with {len(trackpoints)} trackpoints")
+    return get_fallback_zone_analysis(trackpoints, profile, workout_type)
 
 def get_fallback_zone_analysis(trackpoints: List[Dict[str, Any]], 
                               profile: Dict[str, Any], 
@@ -216,12 +191,12 @@ def get_fallback_zone_analysis(trackpoints: List[Dict[str, Any]],
                 if zone:
                     power_zones[f"{zone}_minutes"] += time_minutes
     
-    # Round all values
+    # Round all values and convert to regular Python floats
     for zone_dict in [hr_zones, power_zones]:
         for key in zone_dict:
-            zone_dict[key] = round(zone_dict[key], 2)
+            zone_dict[key] = float(round(zone_dict[key], 2))
     
-    total_duration_minutes = round(df['time_diff_seconds'].sum() / 60, 2)
+    total_duration_minutes = float(round(df['time_diff_seconds'].sum() / 60, 2))
     
     return {
         "heart_rate_zones": hr_zones,

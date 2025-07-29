@@ -10,13 +10,13 @@ import uuid
 
 logger = logging.getLogger(__name__)
 
-def store_workout_zones(workout_id: str, athlete_id: str, zone_data: Dict[str, Any]) -> bool:
+def store_workout_zones(workout_id: str, athlete_id: Optional[str] = None, zone_data: Dict[str, Any] = None) -> bool:
     """
     Store zone analysis results for a workout.
     
     Args:
         workout_id: UUID of the workout
-        athlete_id: UUID of the athlete
+        athlete_id: UUID of the athlete (optional, will be looked up if not provided)
         zone_data: Zone analysis results from the agent
         
     Returns:
@@ -29,13 +29,17 @@ def store_workout_zones(workout_id: str, athlete_id: str, zone_data: Dict[str, A
         total_duration = zone_data.get("total_duration_minutes", 0)
         zones_available = zone_data.get("zones_available", {})
         
-        # First check if the workout exists
-        check_query = "SELECT id FROM workout WHERE id = %s"
-        workout_exists = execute_query(check_query, (workout_id,), fetch_one=True)
+        # First check if the workout exists and get athlete_id if not provided
+        check_query = "SELECT id, athlete_id FROM workout WHERE id = %s"
+        workout_data = execute_query(check_query, (workout_id,), fetch_one=True)
         
-        if not workout_exists:
+        if not workout_data:
             logger.warning(f"Workout {workout_id} does not exist, skipping zone storage")
             return False
+        
+        # Use provided athlete_id or get from workout
+        if athlete_id is None:
+            athlete_id = workout_data[1]  # athlete_id from the query result
         
         query = """
         INSERT INTO workout_zones (
