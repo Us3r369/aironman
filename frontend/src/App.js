@@ -774,7 +774,7 @@ function HeartRatePlot({ data, zoneData, workoutType, zoneDefinitions }) {
   
   const width = 800;
   const height = 400;
-  const margin = { top: 40, right: 60, bottom: 60, left: 80 };
+  const margin = { top: 40, right: 60, bottom: 80, left: 80 }; // Increased bottom margin for x-axis labels
   const plotWidth = width - margin.left - margin.right;
   const plotHeight = height - margin.top - margin.bottom;
   
@@ -875,20 +875,68 @@ function HeartRatePlot({ data, zoneData, workoutType, zoneDefinitions }) {
     );
   }
   
+  // Calculate time-based x-axis labels
+  const totalDuration = hrData.length > 1 ? 
+    (new Date(hrData[hrData.length - 1].timestamp) - new Date(hrData[0].timestamp)) / 1000 / 60 : 0; // minutes
+  const labelInterval = Math.max(1, Math.ceil(totalDuration / 10)); // Show ~10 labels
+  
+  // Create time grid lines and labels
+  const timeLabels = [];
+  for (let i = 0; i < hrData.length; i += Math.ceil(hrData.length / 10)) {
+    const x = scaleX(i);
+    const dataPoint = hrData[i];
+    if (dataPoint && dataPoint.timestamp) {
+      const time = new Date(dataPoint.timestamp);
+      const minutes = Math.floor((time - new Date(hrData[0].timestamp)) / 1000 / 60);
+      
+      // Only show labels at reasonable intervals
+      if (minutes % labelInterval === 0 || i === 0 || i === hrData.length - 1) {
+        timeLabels.push(
+          <g key={`time-label-${i}`}>
+            <line
+              x1={x}
+              y1={margin.top}
+              x2={x}
+              y2={margin.top + plotHeight}
+              stroke="#e5e7eb"
+              strokeWidth="1"
+              opacity="0.5"
+            />
+            <text
+              x={x}
+              y={height - margin.bottom + 15}
+              textAnchor="middle"
+              fontSize="10"
+              fill="#6b7280"
+              transform={`rotate(-45, ${x}, ${height - margin.bottom + 15})`}
+            >
+              {`${Math.floor(minutes / 60)}:${(minutes % 60).toString().padStart(2, '0')}`}
+            </text>
+          </g>
+        );
+      }
+    }
+  }
+  
   // Handle mouse events for hover
   const handleMouseMove = (event) => {
     const rect = event.currentTarget.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
     
-    // Find closest data point
+    // Find closest data point with improved precision
     const index = Math.round(((x - margin.left) / plotWidth) * (hrData.length - 1));
     if (index >= 0 && index < hrData.length) {
       const dataPoint = hrData[index];
+      const time = new Date(dataPoint.timestamp);
+      const startTime = new Date(hrData[0].timestamp);
+      const elapsedMinutes = Math.floor((time - startTime) / 1000 / 60);
+      
       setHoverData({
         index,
         heartRate: dataPoint.heart_rate,
-        timestamp: dataPoint.timestamp
+        timestamp: dataPoint.timestamp,
+        elapsedTime: `${Math.floor(elapsedMinutes / 60)}:${(elapsedMinutes % 60).toString().padStart(2, '0')}`
       });
       setHoverPosition({ x: event.clientX, y: event.clientY });
     }
@@ -922,6 +970,9 @@ function HeartRatePlot({ data, zoneData, workoutType, zoneDefinitions }) {
           {/* Grid lines */}
           {gridLines}
           
+          {/* Time labels */}
+          {timeLabels}
+          
           {/* Heart rate line */}
           <polyline
             fill="none"
@@ -931,8 +982,8 @@ function HeartRatePlot({ data, zoneData, workoutType, zoneDefinitions }) {
           />
           
           {/* Axis labels */}
-          <text x={width / 2} y={height - 10} textAnchor="middle" fontSize="12" fill="#6b7280">
-            Time
+          <text x={width / 2} y={height - 20} textAnchor="middle" fontSize="12" fill="#6b7280">
+            Time (MM:SS)
           </text>
           <text x={20} y={height / 2} textAnchor="middle" fontSize="12" fill="#6b7280" transform={`rotate(-90, 20, ${height / 2})`}>
             Heart Rate (bpm)
@@ -981,7 +1032,7 @@ function HeartRatePlot({ data, zoneData, workoutType, zoneDefinitions }) {
           })}
         </svg>
         
-        {/* Hover tooltip */}
+        {/* Enhanced hover tooltip */}
         {hoverData && (
           <div
             className="hover-tooltip"
@@ -989,48 +1040,83 @@ function HeartRatePlot({ data, zoneData, workoutType, zoneDefinitions }) {
               position: 'absolute',
               left: hoverPosition.x + 10,
               top: hoverPosition.y - 10,
-              background: 'rgba(0, 0, 0, 0.8)',
+              background: 'rgba(0, 0, 0, 0.9)',
               color: 'white',
               padding: '8px 12px',
               borderRadius: '4px',
               fontSize: '12px',
               pointerEvents: 'none',
               zIndex: 1000,
-              whiteSpace: 'nowrap'
+              whiteSpace: 'nowrap',
+              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)'
             }}
           >
-            <div>Time: {formatTime(hoverData.timestamp)}</div>
-            <div>Heart Rate: {hoverData.heartRate} bpm</div>
-            <div>Point: {hoverData.index + 1}</div>
+            <div><strong>Time:</strong> {hoverData.elapsedTime}</div>
+            <div><strong>Heart Rate:</strong> {hoverData.heartRate} bpm</div>
+            <div><strong>Point:</strong> {hoverData.index + 1}</div>
           </div>
         )}
       </div>
       
-      {/* Zone summary */}
+      {/* Enhanced zone summary table */}
       {zoneData && (
-        <div className="zone-summary" style={{ marginTop: '20px', padding: '10px', background: '#f9fafb', borderRadius: '4px' }}>
-          <h5>Zone Summary</h5>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '10px' }}>
-            {Object.entries(zoneData.heart_rate_zones).map(([zone, minutes]) => {
-              if (minutes > 0) {
+        <div className="zone-summary-table" style={{ marginTop: '20px' }}>
+          <h5 style={{ marginBottom: '15px', color: '#374151', fontSize: '14px', fontWeight: '600' }}>
+            Zone Summary
+          </h5>
+          <div style={{ 
+            display: 'grid', 
+            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', 
+            gap: '15px',
+            background: 'white',
+            padding: '15px',
+            borderRadius: '8px',
+            border: '1px solid #e5e7eb',
+            boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)'
+          }}>
+            {Object.entries(zoneData.heart_rate_zones)
+              .filter(([zone, minutes]) => minutes > 0)
+              .map(([zone, minutes]) => {
+                const zoneName = zone.replace('_minutes', '');
+                const zoneRange = zoneRanges[zoneName];
+                const percentage = (minutes / zoneData.total_duration_minutes * 100).toFixed(1);
                 return (
-                  <div key={zone} style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                  <div key={zone} style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    gap: '10px',
+                    padding: '10px',
+                    background: '#f9fafb',
+                    borderRadius: '6px',
+                    border: `2px solid ${zoneColors[zoneName]}`
+                  }}>
                     <div
                       style={{
-                        width: '12px',
-                        height: '12px',
-                        backgroundColor: zoneColors[zone.replace('_minutes', '')],
-                        borderRadius: '2px'
+                        width: '16px',
+                        height: '16px',
+                        backgroundColor: zoneColors[zoneName],
+                        borderRadius: '3px'
                       }}
                     />
-                    <span style={{ fontSize: '12px' }}>
-                      {zone.replace('_minutes', '').toUpperCase()}: {minutes.toFixed(1)} min
-                    </span>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: '600', fontSize: '14px', color: '#374151' }}>
+                        {zoneName.toUpperCase()}
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                        {zoneRange ? `${zoneRange[0]}-${zoneRange[1]} bpm` : 'N/A'}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontWeight: '600', fontSize: '14px', color: '#374151' }}>
+                        {minutes.toFixed(1)} min
+                      </div>
+                      <div style={{ fontSize: '11px', color: '#6b7280' }}>
+                        {percentage}%
+                      </div>
+                    </div>
                   </div>
                 );
-              }
-              return null;
-            })}
+              })}
           </div>
         </div>
       )}
@@ -1039,7 +1125,7 @@ function HeartRatePlot({ data, zoneData, workoutType, zoneDefinitions }) {
 }
 
 // PMC Chart component - Interactive Performance Management Chart
-function PMCChart({ pmcData, workoutsData }) {
+function PMCChart({ pmcData, workoutsData, timeframe, setTimeframe }) {
   const [hoverData, setHoverData] = useState(null);
   const [hoverPosition, setHoverPosition] = useState({ x: 0, y: 0 });
   const [selectedMetrics, setSelectedMetrics] = useState({
@@ -1048,7 +1134,8 @@ function PMCChart({ pmcData, workoutsData }) {
     tsb: true,
     dailyTss: true
   });
-  const [timeframe, setTimeframe] = useState(30); // days
+
+
 
   if (!pmcData || pmcData.length === 0) {
     return (
@@ -1152,7 +1239,7 @@ function PMCChart({ pmcData, workoutsData }) {
     pmcData.forEach(d => {
       const dataX = scaleX(new Date(d.date));
       const distance = Math.abs(x - dataX);
-      if (distance < minDistance && distance < 20) {
+      if (distance < minDistance && distance < 30) { // Increased detection range
         minDistance = distance;
         closestData = d;
       }
@@ -1160,7 +1247,12 @@ function PMCChart({ pmcData, workoutsData }) {
     
     if (closestData) {
       setHoverData(closestData);
-      setHoverPosition({ x: event.clientX, y: event.clientY });
+      // Fixed position at top right corner of chart
+      const rect = event.currentTarget.getBoundingClientRect();
+      setHoverPosition({ 
+        x: rect.left + width - 10, 
+        y: rect.top + 10 
+      });
     } else {
       setHoverData(null);
     }
@@ -1178,14 +1270,11 @@ function PMCChart({ pmcData, workoutsData }) {
     }));
   };
 
-  // Timeframe options
-  const timeframeOptions = [7, 14, 30, 60, 90];
-
   return (
     <div className="pmc-chart-container">
       <h3>Performance Management - All Workout Types</h3>
       
-      {/* Interactive Controls */}
+            {/* Interactive Controls */}
       <div className="pmc-controls">
         <div className="metric-selector">
           <h4>Select Metrics:</h4>
@@ -1222,9 +1311,9 @@ function PMCChart({ pmcData, workoutsData }) {
         </div>
         
         <div className="timeframe-selector">
-          <h4>Timeframe:</h4>
+          <h4>Timeframe: {timeframe} days</h4>
           <div className="timeframe-buttons">
-            {timeframeOptions.map(days => (
+            {[7, 14, 30, 60, 90].map(days => (
               <button
                 key={days}
                 className={`timeframe-btn ${timeframe === days ? 'active' : ''}`}
@@ -1241,7 +1330,7 @@ function PMCChart({ pmcData, workoutsData }) {
            onMouseMove={handleMouseMove} 
            onMouseLeave={handleMouseLeave}>
         <svg width={width} height={height} style={{ background: 'white', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
-          {/* Grid lines for TSS (only if TSS axis is needed) */}
+          {/* Horizontal grid lines for TSS (only if TSS axis is needed) */}
           {needsTssAxis && tssLabels.map(tss => {
             const y = scaleYTSS(tss);
             return (
@@ -1257,7 +1346,7 @@ function PMCChart({ pmcData, workoutsData }) {
             );
           })}
 
-          {/* Grid lines for TSB (only if TSB axis is needed) */}
+          {/* Horizontal grid lines for TSB (only if TSB axis is needed) */}
           {needsTsbAxis && tsbLabels.map(tsb => {
             const y = scaleYTSB(tsb);
             return (
@@ -1270,6 +1359,23 @@ function PMCChart({ pmcData, workoutsData }) {
                 stroke="#f1f5f9"
                 strokeWidth="1"
                 strokeDasharray="2,2"
+              />
+            );
+          })}
+
+          {/* Vertical grid lines for dates */}
+          {pmcData.map((d, i) => {
+            const x = scaleX(new Date(d.date));
+            return (
+              <line
+                key={`grid-vertical-${i}`}
+                x1={x}
+                y1={padding.top}
+                x2={x}
+                y2={height - padding.bottom}
+                stroke="#f1f5f9"
+                strokeWidth="1"
+                opacity="0.5"
               />
             );
           })}
@@ -1499,9 +1605,11 @@ function PMCChart({ pmcData, workoutsData }) {
             className="pmc-tooltip"
             style={{
               position: 'absolute',
-              left: hoverPosition.x + 10,
-              top: hoverPosition.y - 10,
-              transform: 'translateY(-50%)'
+              left: hoverPosition.x - 200, // Align tooltip's right edge with chart's right edge
+              top: hoverPosition.y,
+              transform: 'none',
+              pointerEvents: 'none',
+              zIndex: 1000
             }}
           >
             <div className="tooltip-header">
@@ -1805,6 +1913,9 @@ function PMCDashboard() {
   const [error, setError] = useState(null);
   const [athleteId, setAthleteId] = useState("");
   const [weekOffset, setWeekOffset] = useState(0);
+  const [timeframe, setTimeframe] = useState(30); // days
+
+
 
   // Fetch athleteId from profile
   useEffect(() => {
@@ -1831,15 +1942,15 @@ function PMCDashboard() {
     // Calculate date range based on week offset and timeframe
     const today = new Date();
     const startDate = new Date(today);
-    startDate.setDate(today.getDate() + (weekOffset * 7) - 30);
+    startDate.setDate(today.getDate() + (weekOffset * 7) - timeframe);
     const endDate = new Date(today);
     endDate.setDate(today.getDate() + (weekOffset * 7) + 7);
     
     const start = startDate.toISOString().slice(0, 10);
     const end = endDate.toISOString().slice(0, 10);
     
-    // Fetch PMC data
-    const fetchPMCData = fetch(`http://localhost:8000/api/metrics/pmc?athlete_id=${athleteId}&start_date=${start}&end_date=${end}`)
+    // Fetch PMC data with timeframe parameter
+    const fetchPMCData = fetch(`http://localhost:8000/api/metrics/pmc?athlete_id=${athleteId}&start_date=${start}&end_date=${end}&days=${timeframe}`)
       .then(res => {
         if (!res.ok) throw new Error('Failed to fetch PMC data');
         return res.json();
@@ -1867,7 +1978,7 @@ function PMCDashboard() {
         setError(err.message);
         setLoading(false);
       });
-  }, [athleteId, weekOffset]);
+  }, [athleteId, weekOffset, timeframe]);
 
   // Navigation functions
   const goToPreviousWeek = () => setWeekOffset(prev => prev - 1);
@@ -1919,7 +2030,7 @@ function PMCDashboard() {
           </button>
           <div>
             <h2>Performance Management Chart</h2>
-            <p>Your training load and readiness {formatWeekDisplay()}</p>
+            <p>Your training load and readiness {formatWeekDisplay()} (Timeframe: {timeframe} days)</p>
           </div>
           <button
             className="week-nav-btn"
@@ -1961,8 +2072,15 @@ function PMCDashboard() {
           </div>
         </div>
 
+
+
         <div className="pmc-chart-wrapper">
-          <PMCChart pmcData={pmcData.metrics} workoutsData={workoutsData} />
+          <PMCChart 
+            pmcData={pmcData.metrics} 
+            workoutsData={workoutsData} 
+            timeframe={timeframe} 
+            setTimeframe={setTimeframe}
+          />
         </div>
       </div>
     </div>
