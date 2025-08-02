@@ -700,9 +700,15 @@ def process_activity_files(tcx_path: Path, workout_dir: Path) -> Optional[Dict[s
         except Exception as e:
             logger.warning(f"Could not delete ZIP file: {e}")
 
-    # Load athlete profile to get athlete_id (name)
-    profile = load_json_data(PROFILE_PATH)
-    athlete_id = profile.get("athlete_id") if profile else None
+    # Fetch active athlete profile from the database
+    from utils.database import get_active_profile
+
+    profile = get_active_profile()
+    if not profile:
+        logger.error("Active athlete profile not found in database – aborting processing for %s", tcx_path)
+        return None
+
+    athlete_id = profile.get("athlete_id")
 
     # Parse TCX and merge power data
     try:

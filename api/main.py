@@ -12,6 +12,7 @@ from services.sync import sync_last_n_days, sync_since_last_entry
 import json
 from pathlib import Path
 import datetime as dt
+import math
 
 # Import new logging and exception handling
 from utils.logging_config import setup_logging, get_logger, get_correlation_id, set_correlation_id, ErrorContext
@@ -398,8 +399,16 @@ def update_profile(profile: AthleteProfile):
                 with conn.cursor() as cur:
                     z = profile.zones
                     now = datetime.now()
+                    # Resolve athlete UUID – create athlete row if it does not exist
+                    try:
+                        athlete_uuid = get_athlete_uuid(profile.athlete_id)
+                    except ValueError:
+                        # Insert new athlete row and fetch UUID
+                        cur.execute("INSERT INTO athlete (name) VALUES (%s) RETURNING id", (profile.athlete_id,))
+                        athlete_uuid = cur.fetchone()[0]
+
                     columns = [
-                        'json_athlete_id', 'valid_from', 'valid_to',
+                        'athlete_id', 'json_athlete_id', 'valid_from', 'valid_to',
                         'lt_heartrate',
                         'hr_zone_z1_lower', 'hr_zone_z1_upper',
                         'hr_zone_z2_lower', 'hr_zone_z2_upper',
@@ -443,7 +452,7 @@ def update_profile(profile: AthleteProfile):
                         'bike_ftp_test', 'run_ltp_test', 'swim_css_test'
                     ]
                     values = [
-                        profile.athlete_id, now, None,
+                        athlete_uuid, profile.athlete_id, now, None,
                         z.heart_rate.lt_hr,
                         *z.heart_rate.zones.z1, *z.heart_rate.zones.z2, *z.heart_rate.zones.zx, *z.heart_rate.zones.z3, *z.heart_rate.zones.zy, *z.heart_rate.zones.z4, *z.heart_rate.zones.z5,
                         z.bike_power.ftp,
@@ -464,14 +473,15 @@ def update_profile(profile: AthleteProfile):
                         INSERT INTO athlete_profile ({colnames})
                         VALUES ({placeholders})
                     """, values)
-                    # Update valid_to for previous rows for this athlete
+
+                    # Close previous active profile (if any) for the athlete
                     cur.execute(
                         """
                         UPDATE athlete_profile
                         SET valid_to = %s
-                        WHERE json_athlete_id = %s AND valid_to IS NULL AND valid_from < %s
+                        WHERE athlete_id = %s AND valid_to IS NULL AND valid_from < %s
                         """,
-                        (now - timedelta(seconds=1), profile.athlete_id, now)
+                        (now - timedelta(seconds=1), athlete_uuid, now)
                     )
                     conn.commit()
                     logger.info(f"Profile updated successfully for athlete {profile.athlete_id}")
@@ -564,6 +574,274 @@ def get_workout_detail(workout_id: str):
                 tss=row[4],
                 json_file=row[5],
             )
+
+# --- Timeseries Models ---
+class TimeseriesPoint(BaseModel):
+    timestamp: str
+    value: float
+    unit: str
+
+class TimeseriesResponse(BaseModel):
+    workout_id: str
+    metric: str
+    data: List[TimeseriesPoint]
+    available_metrics: List[str]
+
+@app.get("/api/workouts/{workout_id}/timeseries", response_model=TimeseriesResponse)
+def get_workout_timeseries(
+    workout_id: str,
+    metric: str = Query(..., description="Metric type: hr, pace, power, speed, cadence, altitude, form_power, air_power")
+):
+    """Get timeseries data for a specific workout and metric."""
+    # Define valid metrics for each workout type
+    valid_metrics = {
+        "swim": ["hr"],
+        "bike": ["hr", "pace", "power", "speed", "cadence", "distance"],
+        "run": ["hr", "pace", "power", "speed", "run_cadence", "altitude", "form_power", "air_power", "distance"]
+    }
+    
+    with get_db_conn() as conn:
+        with conn.cursor() as cur:
+            # Get workout data
+            cur.execute(
+                """
+                SELECT json_file, workout_type
+                FROM workout
+                WHERE id = %s
+                """,
+                (workout_id,)
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Workout not found")
+            
+            json_file = row[0]
+            workout_type = row[1]
+            
+            if not json_file or not json_file.get("data"):
+                raise HTTPException(status_code=404, detail="No timeseries data available for this workout")
+            
+            # Get available metrics for this workout type
+            workout_metrics = valid_metrics.get(workout_type, [])
+            
+            # Detect which metrics are actually available in the data
+            available_metrics = []
+            sample_data = json_file["data"][0] if json_file["data"] else {}
+            
+            # Check for heart rate
+            if "heart_rate" in sample_data:
+                available_metrics.append("hr")
+            
+            # Check for GPS data (for pace calculation)
+            if "latitude" in sample_data and "longitude" in sample_data:
+                available_metrics.append("pace")
+            
+            # Check for power metrics
+            if "power" in sample_data:
+                available_metrics.append("power")
+            if "Power" in sample_data:  # Run workouts use capital P
+                available_metrics.append("power")
+            if "watts" in sample_data:
+                available_metrics.append("power")
+            
+            # Check for speed
+            if "speed" in sample_data:
+                available_metrics.append("speed")
+            
+            # Check for cadence
+            if "cadence" in sample_data:
+                available_metrics.append("cadence")
+            if "run_cadence" in sample_data:
+                available_metrics.append("run_cadence")
+            
+            # Check for altitude
+            if "altitude" in sample_data:
+                available_metrics.append("altitude")
+            
+            # Check for form power (run only)
+            if "Form Power" in sample_data:
+                available_metrics.append("form_power")
+            
+            # Check for air power (run only)
+            if "Air Power" in sample_data:
+                available_metrics.append("air_power")
+            
+            # Check for distance
+            if "distance" in sample_data:
+                available_metrics.append("distance")
+            
+            # Check if requested metric is available
+            if metric not in available_metrics:
+                raise HTTPException(
+                    status_code=404, 
+                    detail=f"Metric '{metric}' not available. Available metrics: {', '.join(available_metrics)}"
+                )
+            
+            # Extract timeseries data based on metric
+            timeseries_data = []
+            
+            if metric == "hr":
+                # Heart rate data
+                for point in json_file["data"]:
+                    if point.get("heart_rate") is not None:
+                        timeseries_data.append(TimeseriesPoint(
+                            timestamp=point.get("timestamp", ""),
+                            value=float(point["heart_rate"]),
+                            unit="bpm"
+                        ))
+            
+            elif metric == "power":
+                # Power data (handle both "power" and "Power" fields)
+                for point in json_file["data"]:
+                    power_value = point.get("power") or point.get("Power") or point.get("watts")
+                    if power_value is not None:
+                        timeseries_data.append(TimeseriesPoint(
+                            timestamp=point.get("timestamp", ""),
+                            value=float(power_value),
+                            unit="W"
+                        ))
+            
+            elif metric == "pace":
+                # Calculate pace from GPS coordinates
+                timeseries_data = calculate_pace_from_gps(json_file["data"])
+            
+            elif metric == "speed":
+                # Speed data
+                for point in json_file["data"]:
+                    if point.get("speed") is not None:
+                        timeseries_data.append(TimeseriesPoint(
+                            timestamp=point.get("timestamp", ""),
+                            value=float(point["speed"]),
+                            unit="km/h"
+                        ))
+            
+            elif metric == "cadence":
+                # Cadence data (bike)
+                for point in json_file["data"]:
+                    if point.get("cadence") is not None:
+                        timeseries_data.append(TimeseriesPoint(
+                            timestamp=point.get("timestamp", ""),
+                            value=float(point["cadence"]),
+                            unit="rpm"
+                        ))
+            
+            elif metric == "run_cadence":
+                # Run cadence data
+                for point in json_file["data"]:
+                    if point.get("run_cadence") is not None:
+                        timeseries_data.append(TimeseriesPoint(
+                            timestamp=point.get("timestamp", ""),
+                            value=float(point["run_cadence"]),
+                            unit="spm"
+                        ))
+            
+            elif metric == "altitude":
+                # Altitude data
+                for point in json_file["data"]:
+                    if point.get("altitude") is not None:
+                        timeseries_data.append(TimeseriesPoint(
+                            timestamp=point.get("timestamp", ""),
+                            value=float(point["altitude"]),
+                            unit="m"
+                        ))
+            
+            elif metric == "form_power":
+                # Form power data (run only)
+                for point in json_file["data"]:
+                    if point.get("Form Power") is not None:
+                        timeseries_data.append(TimeseriesPoint(
+                            timestamp=point.get("timestamp", ""),
+                            value=float(point["Form Power"]),
+                            unit="W"
+                        ))
+            
+            elif metric == "air_power":
+                # Air power data (run only)
+                for point in json_file["data"]:
+                    if point.get("Air Power") is not None:
+                        timeseries_data.append(TimeseriesPoint(
+                            timestamp=point.get("timestamp", ""),
+                            value=float(point["Air Power"]),
+                            unit="W"
+                        ))
+            
+            elif metric == "distance":
+                # Distance data
+                for point in json_file["data"]:
+                    if point.get("distance") is not None:
+                        timeseries_data.append(TimeseriesPoint(
+                            timestamp=point.get("timestamp", ""),
+                            value=float(point["distance"]),
+                            unit="km"
+                        ))
+            
+            return TimeseriesResponse(
+                workout_id=workout_id,
+                metric=metric,
+                data=timeseries_data,
+                available_metrics=available_metrics
+            )
+
+def calculate_pace_from_gps(data_points: List[Dict[str, Any]]) -> List[TimeseriesPoint]:
+    """Calculate pace (min/km) from GPS coordinates."""
+    pace_data = []
+    
+    for i in range(1, len(data_points)):
+        prev_point = data_points[i-1]
+        curr_point = data_points[i]
+        
+        # Check if both points have valid GPS coordinates
+        if (prev_point.get("latitude") is not None and 
+            prev_point.get("longitude") is not None and
+            curr_point.get("latitude") is not None and 
+            curr_point.get("longitude") is not None):
+            
+            # Calculate distance between points (Haversine formula)
+            lat1, lon1 = float(prev_point["latitude"]), float(prev_point["longitude"])
+            lat2, lon2 = float(curr_point["latitude"]), float(curr_point["longitude"])
+            
+            # Convert to radians
+            lat1_rad = math.radians(lat1)
+            lat2_rad = math.radians(lat2)
+            delta_lat = math.radians(lat2 - lat1)
+            delta_lon = math.radians(lon2 - lon1)
+            
+            # Haversine formula
+            a = (math.sin(delta_lat/2) * math.sin(delta_lat/2) +
+                 math.cos(lat1_rad) * math.cos(lat2_rad) *
+                 math.sin(delta_lon/2) * math.sin(delta_lon/2))
+            c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+            distance_km = 6371 * c  # Earth radius in km
+            
+            # Calculate time difference
+            if prev_point.get("timestamp") and curr_point.get("timestamp"):
+                try:
+                    time1 = datetime.fromisoformat(prev_point["timestamp"].replace('Z', '+00:00'))
+                    time2 = datetime.fromisoformat(curr_point["timestamp"].replace('Z', '+00:00'))
+                    time_diff_minutes = (time2 - time1).total_seconds() / 60
+                    
+                    if time_diff_minutes > 0 and distance_km > 0:
+                        # Calculate pace (minutes per kilometer)
+                        pace_min_per_km = time_diff_minutes / distance_km
+                        
+                        # Convert to MM:SS format
+                        minutes = int(pace_min_per_km)
+                        seconds = int((pace_min_per_km - minutes) * 60)
+                        pace_str = f"{minutes}:{seconds:02d}"
+                        
+                        # Store as seconds for easier charting
+                        pace_seconds = minutes * 60 + seconds
+                        
+                        pace_data.append(TimeseriesPoint(
+                            timestamp=curr_point.get("timestamp", ""),
+                            value=pace_seconds,
+                            unit="min/km"
+                        ))
+                except (ValueError, TypeError):
+                    # Skip points with invalid timestamps
+                    continue
+    
+    return pace_data
 
 # --- Zone Analysis Models ---
 class ZoneData(BaseModel):

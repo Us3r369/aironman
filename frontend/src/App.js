@@ -441,24 +441,51 @@ function ViewProfile() {
 }
 
 // Calendar utility: get dates for any week (Monday-Sunday)
-function getWeekDates(weekOffset = 0) {
+function getMonthDates(monthOffset = 0) {
   const today = new Date();
-  const monday = new Date(today);
-  monday.setDate(today.getDate() - today.getDay() + 1); // Monday
-  // Add week offset
-  monday.setDate(monday.getDate() + (weekOffset * 7));
-  const week = [];
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(monday);
-    d.setDate(monday.getDate() + i);
-    week.push(d);
+  const currentYear = today.getFullYear();
+  const currentMonth = today.getMonth();
+  
+  // Calculate target month
+  const targetYear = currentYear + Math.floor((currentMonth + monthOffset) / 12);
+  const targetMonth = (currentMonth + monthOffset) % 12;
+  
+  // Get first day of the month
+  const firstDay = new Date(targetYear, targetMonth, 1);
+  const lastDay = new Date(targetYear, targetMonth + 1, 0);
+  
+  // Get the day of week for first day (0 = Sunday)
+  const firstDayOfWeek = firstDay.getDay();
+  
+  // Calculate start date (previous month's days to fill first week)
+  const startDate = new Date(firstDay);
+  startDate.setDate(1 - firstDayOfWeek);
+  
+  // Calculate end date (next month's days to fill last week)
+  const endDate = new Date(lastDay);
+  const lastDayOfWeek = lastDay.getDay();
+  endDate.setDate(lastDay.getDate() + (6 - lastDayOfWeek));
+  
+  // Generate all dates for the calendar
+  const dates = [];
+  const currentDate = new Date(startDate);
+  
+  while (currentDate <= endDate) {
+    dates.push(new Date(currentDate));
+    currentDate.setDate(currentDate.getDate() + 1);
   }
-  return week;
+  
+  return {
+    dates,
+    year: targetYear,
+    month: targetMonth,
+    monthName: firstDay.toLocaleDateString('en-US', { month: 'long' })
+  };
 }
 
-// Get current week dates (for backward compatibility)
-function getCurrentWeekDates() {
-  return getWeekDates(0);
+// Get current month dates (for backward compatibility)
+function getCurrentMonthDates() {
+  return getMonthDates(0);
 }
 
 function WorkoutsView() {
@@ -470,11 +497,72 @@ function WorkoutsView() {
   const [detailError, setDetailError] = useState(null);
   const [workoutDetail, setWorkoutDetail] = useState(null);
   const [athleteId, setAthleteId] = useState("");
-  const [weekOffset, setWeekOffset] = useState(0); // 0 = current week, -1 = previous week, etc.
+  const [monthOffset, setMonthOffset] = useState(0);
   const [zoneData, setZoneData] = useState(null);
   const [zoneLoading, setZoneLoading] = useState(false);
   const [zoneDefinitions, setZoneDefinitions] = useState(null);
   const [zoneDefsLoading, setZoneDefsLoading] = useState(false);
+  const [selectedMetric, setSelectedMetric] = useState("hr");
+  const [availableMetrics, setAvailableMetrics] = useState(["hr"]);
+  const [metricLoading, setMetricLoading] = useState(false);
+
+  // URL query parameter management
+  const updateURL = (workoutId, metric) => {
+    const url = new URL(window.location);
+    if (workoutId) {
+      url.searchParams.set('workout', workoutId);
+    } else {
+      url.searchParams.delete('workout');
+    }
+    if (metric) {
+      url.searchParams.set('metric', metric);
+    } else {
+      url.searchParams.delete('metric');
+    }
+    window.history.replaceState({}, '', url);
+  };
+
+  const getURLParams = () => {
+    const url = new URL(window.location);
+    return {
+      workoutId: url.searchParams.get('workout'),
+      metric: url.searchParams.get('metric') || 'hr'
+    };
+  };
+
+  // Initialize from URL on component mount
+  useEffect(() => {
+    const { workoutId, metric } = getURLParams();
+    if (workoutId && workoutId !== selectedWorkout) {
+      setSelectedWorkout(workoutId);
+    }
+    if (metric && metric !== selectedMetric) {
+      setSelectedMetric(metric);
+    }
+  }, []);
+
+  // Update URL when workout or metric changes
+  useEffect(() => {
+    updateURL(selectedWorkout, selectedMetric);
+  }, [selectedWorkout, selectedMetric]);
+
+  // Handle metric change with URL update
+  const handleMetricChange = (newMetric) => {
+    setSelectedMetric(newMetric);
+    updateURL(selectedWorkout, newMetric);
+  };
+
+  // Handle workout selection with URL update
+  const handleWorkoutSelect = (workoutId) => {
+    setSelectedWorkout(workoutId);
+    updateURL(workoutId, selectedMetric);
+  };
+
+  // Handle workout close with URL update
+  const handleWorkoutClose = () => {
+    setSelectedWorkout(null);
+    updateURL(null, selectedMetric);
+  };
 
   // Fetch athleteId from profile (assume single athlete for now)
   useEffect(() => {
@@ -492,14 +580,14 @@ function WorkoutsView() {
     fetchProfile();
   }, []);
 
-  // Fetch workouts for selected week
+  // Fetch workouts for selected month
   useEffect(() => {
     if (!athleteId) return;
     setLoading(true);
     setError(null);
-    const week = getWeekDates(weekOffset);
-    const start = week[0].toISOString().slice(0, 10);
-    const end = week[6].toISOString().slice(0, 10);
+    const month = getMonthDates(monthOffset);
+    const start = month.dates[0].toISOString().slice(0, 10);
+    const end = month.dates[month.dates.length - 1].toISOString().slice(0, 10);
     fetch(`http://localhost:8000/api/workouts?athlete_id=${athleteId}&start_date=${start}&end_date=${end}`)
       .then(res => {
         if (!res.ok) throw new Error('Failed to fetch workouts');
@@ -513,7 +601,7 @@ function WorkoutsView() {
         setError(err.message);
         setLoading(false);
       });
-  }, [athleteId, weekOffset]);
+  }, [athleteId, monthOffset]);
 
   // Fetch zone definitions when athleteId is available
   useEffect(() => {
@@ -552,6 +640,29 @@ function WorkoutsView() {
         setWorkoutDetail(data);
         setDetailLoading(false);
         
+        // Fetch available metrics for this workout
+        setMetricLoading(true);
+        fetch(`http://localhost:8000/api/workouts/${selectedWorkout}/timeseries?metric=hr`)
+          .then(res => {
+            if (res.ok) {
+              return res.json();
+            }
+            throw new Error('Failed to fetch available metrics');
+          })
+          .then(data => {
+            setAvailableMetrics(data.available_metrics);
+            // Set default metric to first available
+            if (data.available_metrics.length > 0 && !data.available_metrics.includes(selectedMetric)) {
+              setSelectedMetric(data.available_metrics[0]);
+            }
+            setMetricLoading(false);
+          })
+          .catch(err => {
+            console.warn('Could not determine available metrics:', err.message);
+            setAvailableMetrics(["hr"]);
+            setMetricLoading(false);
+          });
+        
         // Fetch zone data for bike and run workouts
         if (data.workout_type === 'bike' || data.workout_type === 'run') {
           setZoneLoading(true);
@@ -576,7 +687,7 @@ function WorkoutsView() {
       });
   }, [selectedWorkout]);
 
-  const week = getWeekDates(weekOffset);
+  const month = getMonthDates(monthOffset);
   // Group workouts by date (YYYY-MM-DD)
   const workoutsByDate = {};
   workouts.forEach(w => {
@@ -586,62 +697,24 @@ function WorkoutsView() {
   });
 
   // Navigation functions
-  const goToPreviousWeek = () => {
-    setWeekOffset(weekOffset - 1);
-  };
+  const goToPreviousMonth = () => setMonthOffset(prev => prev - 1);
+  const goToNextMonth = () => setMonthOffset(prev => prev + 1);
+  const goToCurrentMonth = () => setMonthOffset(0);
 
-  const goToNextWeek = () => {
-    setWeekOffset(weekOffset + 1);
-  };
-
-  const goToCurrentWeek = () => {
-    setWeekOffset(0);
-  };
-
-  // Format week display
-  const formatWeekDisplay = () => {
-    const startDate = week[0];
-    const endDate = week[6];
-    const isCurrentWeek = weekOffset === 0;
-    
-    if (isCurrentWeek) {
-      return "This Week";
-    } else if (weekOffset === -1) {
-      return "Last Week";
-    } else if (weekOffset === 1) {
-      return "Next Week";
-    } else {
-      return `${startDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} - ${endDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
-    }
+  const formatMonthDisplay = () => {
+    return month.monthName + ' ' + month.year;
   };
 
   return (
     <div className="workouts-container">
       <div className="workouts-header">
-        <button 
-          className="week-nav-btn" 
-          onClick={goToPreviousWeek}
-          title="Previous Week"
-        >
-          ←
-        </button>
-        <h2>Workouts {formatWeekDisplay()}</h2>
-        <button 
-          className="week-nav-btn" 
-          onClick={goToNextWeek}
-          title="Next Week"
-        >
-          →
-        </button>
-        {weekOffset !== 0 && (
-          <button 
-            className="current-week-btn" 
-            onClick={goToCurrentWeek}
-            title="Go to Current Week"
-          >
-            Today
-          </button>
-        )}
+        <h2>Workouts</h2>
+        <div className="month-navigation">
+          <button onClick={goToPreviousMonth}>&lt; Previous Month</button>
+          <button onClick={goToCurrentMonth} className="current-btn">Current Month</button>
+          <button onClick={goToNextMonth}>Next Month &gt;</button>
+        </div>
+        <div className="month-display">{formatMonthDisplay()}</div>
       </div>
       {loading ? (
         <div className="loading-spinner">Loading workouts...</div>
@@ -651,44 +724,56 @@ function WorkoutsView() {
         <table className="calendar-table">
           <thead>
             <tr>
-              {week.map(d => (
-                <th key={d.toISOString().slice(0, 10)}>
-                  {d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
-                </th>
-              ))}
+              <th>Sun</th>
+              <th>Mon</th>
+              <th>Tue</th>
+              <th>Wed</th>
+              <th>Thu</th>
+              <th>Fri</th>
+              <th>Sat</th>
             </tr>
           </thead>
           <tbody>
-            <tr>
-              {week.map(d => {
-                const dateStr = d.toISOString().slice(0, 10);
-                const dayWorkouts = workoutsByDate[dateStr] || [];
-                return (
-                  <td key={dateStr} className="calendar-cell">
-                    {dayWorkouts.length === 0 ? (
-                      <span className="no-workout">-</span>
-                    ) : (
-                      <ul className="workout-list">
-                        {dayWorkouts.map(w => (
-                          <li key={w.id} className="workout-item" onClick={() => setSelectedWorkout(w.id)}>
-                            <span className="workout-type">{w.workout_type}</span>
-                            {w.tss !== null && <span className="workout-tss">TSS: {w.tss}</span>}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </td>
-                );
-              })}
-            </tr>
+            {Array.from({ length: Math.ceil(month.dates.length / 7) }, (_, weekIndex) => (
+              <tr key={weekIndex}>
+                {Array.from({ length: 7 }, (_, dayIndex) => {
+                  const dateIndex = weekIndex * 7 + dayIndex;
+                  const date = month.dates[dateIndex];
+                  if (!date) return <td key={dayIndex} className="calendar-cell empty"></td>;
+                  
+                  const dateStr = date.toISOString().slice(0, 10);
+                  const dayWorkouts = workoutsByDate[dateStr] || [];
+                  const isCurrentMonth = date.getMonth() === month.month;
+                  const isToday = date.toDateString() === new Date().toDateString();
+                  
+                  return (
+                    <td key={dayIndex} className={`calendar-cell ${!isCurrentMonth ? 'other-month' : ''} ${isToday ? 'today' : ''}`}>
+                      <div className="date-number">{date.getDate()}</div>
+                      {dayWorkouts.length === 0 ? (
+                        <span className="no-workout">-</span>
+                      ) : (
+                        <ul className="workout-list">
+                          {dayWorkouts.map(w => (
+                            <li key={w.id} className="workout-item" onClick={() => handleWorkoutSelect(w.id)}>
+                              <span className="workout-type">{w.workout_type}</span>
+                              {w.tss !== null && <span className="workout-tss">TSS: {w.tss}</span>}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
           </tbody>
         </table>
       )}
       {/* Workout detail modal */}
       {selectedWorkout && (
-        <div className="workout-modal-overlay" onClick={() => setSelectedWorkout(null)}>
+        <div className="workout-modal-overlay" onClick={handleWorkoutClose}>
           <div className="workout-modal" onClick={e => e.stopPropagation()}>
-            <button className="close-btn" onClick={() => setSelectedWorkout(null)}>&times;</button>
+            <button className="close-btn" onClick={handleWorkoutClose}>&times;</button>
             {detailLoading ? (
               <div className="loading-spinner">Loading workout...</div>
             ) : detailError ? (
@@ -700,25 +785,34 @@ function WorkoutsView() {
                 <div><b>Date:</b> {workoutDetail.timestamp}</div>
                 <div><b>TSS:</b> {workoutDetail.tss}</div>
                 
-                {/* Heart Rate Plot for bike and run workouts */}
-                {(workoutDetail.workout_type === 'bike' || workoutDetail.workout_type === 'run') && 
-                 workoutDetail.json_file && workoutDetail.json_file.data && Array.isArray(workoutDetail.json_file.data) && (
+                {/* Metric Selector and Chart */}
+                {workoutDetail.json_file && workoutDetail.json_file.data && Array.isArray(workoutDetail.json_file.data) && (
                   <div>
-                    {zoneLoading || zoneDefsLoading ? (
-                      <div className="loading-spinner">Loading zone analysis...</div>
+                    {metricLoading ? (
+                      <div className="loading-spinner">Loading available metrics...</div>
                     ) : (
-                      <HeartRatePlot 
-                        data={workoutDetail.json_file.data} 
-                        zoneData={zoneData}
-                        workoutType={workoutDetail.workout_type}
-                        zoneDefinitions={zoneDefinitions}
-                      />
+                      <>
+                        <MetricSelector
+                          selectedMetric={selectedMetric}
+                          onMetricChange={handleMetricChange}
+                          availableMetrics={availableMetrics}
+                          workoutType={workoutDetail.workout_type}
+                        />
+                        <WorkoutChart
+                          workoutId={selectedWorkout}
+                          selectedMetric={selectedMetric}
+                          availableMetrics={availableMetrics}
+                          zoneData={zoneData}
+                          workoutType={workoutDetail.workout_type}
+                          zoneDefinitions={zoneDefinitions}
+                        />
+                      </>
                     )}
                   </div>
                 )}
                 
-                {/* Tabular data for other workout types or when no heart rate data */}
-                {((workoutDetail.workout_type !== 'bike' && workoutDetail.workout_type !== 'run') || 
+                {/* Tabular data for workouts without chart visualization or when no heart rate data */}
+                {((!['bike', 'run', 'swim'].includes(workoutDetail.workout_type)) || 
                   !workoutDetail.json_file?.data?.some(d => d.heart_rate)) && 
                  workoutDetail.json_file && workoutDetail.json_file.data && Array.isArray(workoutDetail.json_file.data) && (
                   <div className="workout-table-container">
@@ -745,15 +839,16 @@ function WorkoutsView() {
                   </div>
                 )}
                 
-                {/* Pretty-printed JSON for the full json_file */}
-                {workoutDetail.json_file && (
-                  <div className="json-file-block">
-                    <h4>Raw JSON</h4>
-                    <pre style={{ maxHeight: 300, overflow: 'auto', background: '#f8f8f8', border: '1px solid #ccc', padding: 8 }}>
-                      {JSON.stringify(workoutDetail.json_file, null, 2)}
-                    </pre>
-                  </div>
-                )}
+                {/* Pretty-printed JSON for the full json_file - only show for workouts without chart visualization */}
+                {workoutDetail.json_file && 
+                 !['bike', 'run', 'swim'].includes(workoutDetail.workout_type) && (
+                   <div className="json-file-block">
+                     <h4>Raw JSON</h4>
+                     <pre style={{ maxHeight: 300, overflow: 'auto', background: '#f8f8f8', border: '1px solid #ccc', padding: 8 }}>
+                       {JSON.stringify(workoutDetail.json_file, null, 2)}
+                     </pre>
+                   </div>
+                 )}
               </div>
             ) : null}
           </div>
@@ -763,30 +858,135 @@ function WorkoutsView() {
   );
 }
 
-// Sophisticated heart rate plot with zone visualization
-function HeartRatePlot({ data, zoneData, workoutType, zoneDefinitions }) {
+// Metric Selector Component
+function MetricSelector({ selectedMetric, onMetricChange, availableMetrics, workoutType }) {
+  const metricOptions = [
+    { value: "hr", label: "Heart Rate", color: "#ef4444" },
+    { value: "pace", label: "Pace", color: "#3b82f6" },
+    { value: "power", label: "Power", color: "#8b5cf6" },
+    { value: "speed", label: "Speed", color: "#10b981" },
+    { value: "cadence", label: "Cadence", color: "#f59e0b" },
+    { value: "run_cadence", label: "Run Cadence", color: "#f59e0b" },
+    { value: "altitude", label: "Altitude", color: "#6366f1" },
+    { value: "form_power", label: "Form Power", color: "#ec4899" },
+    { value: "air_power", label: "Air Power", color: "#8b5cf6" },
+    { value: "distance", label: "Distance", color: "#06b6d4" }
+  ];
+  
+  // Filter options based on workout type and available metrics
+  const availableOptions = metricOptions.filter(option => {
+    if (workoutType === "swim" && option.value === "run_cadence") return false;
+    if (workoutType === "bike" && option.value === "run_cadence") return false;
+    if (workoutType === "run" && option.value === "cadence") return false;
+    if (workoutType === "swim" && (option.value === "form_power" || option.value === "air_power")) return false;
+    if (workoutType === "bike" && (option.value === "form_power" || option.value === "air_power")) return false;
+    return availableMetrics.includes(option.value);
+  });
+  
+  if (availableOptions.length <= 1) return null;
+  
+  return (
+    <div className="metric-selector">
+      <label htmlFor="metric-select">Metric:</label>
+      <select
+        id="metric-select"
+        value={selectedMetric}
+        onChange={(e) => onMetricChange(e.target.value)}
+        className="metric-dropdown"
+      >
+        {availableOptions.map(option => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+// Enhanced Workout Chart Component (renamed from HeartRatePlot)
+function WorkoutChart({ workoutId, selectedMetric, availableMetrics, zoneData, workoutType, zoneDefinitions }) {
+  const [timeseriesData, setTimeseriesData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
   const [hoverData, setHoverData] = useState(null);
   const [hoverPosition, setHoverPosition] = useState({ x: 0, y: 0 });
   
-  // Extract heart rate data
-  const hrData = data.filter(d => d.heart_rate !== undefined && d.heart_rate !== null);
-  if (hrData.length < 2) return null;
+  // Fetch timeseries data when metric changes
+  useEffect(() => {
+    if (!workoutId || !selectedMetric) return;
+    
+    setLoading(true);
+    setError(null);
+    
+    fetch(`http://localhost:8000/api/workouts/${workoutId}/timeseries?metric=${selectedMetric}`)
+      .then(res => {
+        if (!res.ok) {
+          if (res.status === 404) {
+            throw new Error(`No ${selectedMetric} data available for this workout`);
+          }
+          throw new Error('Failed to fetch timeseries data');
+        }
+        return res.json();
+      })
+      .then(data => {
+        setTimeseriesData(data);
+        setLoading(false);
+      })
+      .catch(err => {
+        setError(err.message);
+        setLoading(false);
+      });
+  }, [workoutId, selectedMetric]);
   
+  if (loading) {
+    return <div className="loading-spinner">Loading {selectedMetric} data...</div>;
+  }
+  
+  if (error) {
+    return <div className="error-message">{error}</div>;
+  }
+  
+  if (!timeseriesData || timeseriesData.data.length < 2) {
+    return <div className="no-data">No {selectedMetric} data available</div>;
+  }
+  
+  const data = timeseriesData.data;
   const width = 800;
   const height = 400;
-  const margin = { top: 40, right: 60, bottom: 80, left: 80 }; // Increased bottom margin for x-axis labels
+  const margin = { top: 40, right: 60, bottom: 80, left: 100 };
   const plotWidth = width - margin.left - margin.right;
   const plotHeight = height - margin.top - margin.bottom;
   
-  // Calculate scales
-  const minHR = Math.min(...hrData.map(d => d.heart_rate));
-  const maxHR = Math.max(...hrData.map(d => d.heart_rate));
-  const hrRange = maxHR - minHR;
+  // Calculate scales based on metric
+  const values = data.map(d => d.value);
+  const minValue = Math.min(...values);
+  const maxValue = Math.max(...values);
+  const valueRange = maxValue - minValue;
   
-  const scaleY = (hr) => margin.top + plotHeight - ((hr - minHR) / hrRange) * plotHeight;
-  const scaleX = (index) => margin.left + (index / (hrData.length - 1)) * plotWidth;
+  const scaleY = (value) => margin.top + plotHeight - ((value - minValue) / valueRange) * plotHeight;
+  const scaleX = (index) => margin.left + (index / (data.length - 1)) * plotWidth;
   
-  // Zone colors
+  // Metric-specific styling
+  const getMetricStyle = () => {
+    const styles = {
+      hr: { color: "#ef4444", label: "Heart Rate" },
+      pace: { color: "#3b82f6", label: "Pace" },
+      power: { color: "#8b5cf6", label: "Power" },
+      speed: { color: "#10b981", label: "Speed" },
+      cadence: { color: "#f59e0b", label: "Cadence" },
+      run_cadence: { color: "#f59e0b", label: "Run Cadence" },
+      altitude: { color: "#6366f1", label: "Altitude" },
+      form_power: { color: "#ec4899", label: "Form Power" },
+      air_power: { color: "#8b5cf6", label: "Air Power" },
+      distance: { color: "#06b6d4", label: "Distance" }
+    };
+    return styles[selectedMetric] || { color: "#6b7280", label: "Unknown" };
+  };
+  
+  const metricStyle = getMetricStyle();
+  
+  // Zone colors (only for heart rate)
   const zoneColors = {
     z1: '#4ade80', // green
     z2: '#fbbf24', // yellow
@@ -797,55 +997,49 @@ function HeartRatePlot({ data, zoneData, workoutType, zoneDefinitions }) {
     z5: '#581c87'  // purple
   };
   
-  // Zone ranges from database (fallback to defaults if not available)
-  const zoneRanges = zoneDefinitions?.heart_rate ? {
-    z1: [zoneDefinitions.heart_rate.z1.lower, zoneDefinitions.heart_rate.z1.upper],
-    z2: [zoneDefinitions.heart_rate.z2.lower, zoneDefinitions.heart_rate.z2.upper],
-    zx: [zoneDefinitions.heart_rate.zx.lower, zoneDefinitions.heart_rate.zx.upper],
-    z3: [zoneDefinitions.heart_rate.z3.lower, zoneDefinitions.heart_rate.z3.upper],
-    zy: [zoneDefinitions.heart_rate.zy.lower, zoneDefinitions.heart_rate.zy.upper],
-    z4: [zoneDefinitions.heart_rate.z4.lower, zoneDefinitions.heart_rate.z4.upper],
-    z5: [zoneDefinitions.heart_rate.z5.lower, zoneDefinitions.heart_rate.z5.upper]
-  } : {
-    z1: [124, 139],
-    z2: [139, 155],
-    zx: [155, 163],
-    z3: [163, 172],
-    zy: [172, 175],
-    z4: [175, 181],
-    z5: [181, 255]
-  };
+  // Zone backgrounds (only for heart rate)
+  let zoneBackgrounds = [];
+  if (selectedMetric === "hr" && zoneDefinitions?.heart_rate) {
+    const zoneRanges = {
+      z1: [zoneDefinitions.heart_rate.z1.lower, zoneDefinitions.heart_rate.z1.upper],
+      z2: [zoneDefinitions.heart_rate.z2.lower, zoneDefinitions.heart_rate.z2.upper],
+      zx: [zoneDefinitions.heart_rate.zx.lower, zoneDefinitions.heart_rate.zx.upper],
+      z3: [zoneDefinitions.heart_rate.z3.lower, zoneDefinitions.heart_rate.z3.upper],
+      zy: [zoneDefinitions.heart_rate.zy.lower, zoneDefinitions.heart_rate.zy.upper],
+      z4: [zoneDefinitions.heart_rate.z4.lower, zoneDefinitions.heart_rate.z4.upper],
+      z5: [zoneDefinitions.heart_rate.z5.lower, zoneDefinitions.heart_rate.z5.upper]
+    };
+    
+    zoneBackgrounds = Object.entries(zoneRanges).map(([zone, [min, max]]) => {
+      const y1 = scaleY(max);
+      const y2 = scaleY(min);
+      return (
+        <rect
+          key={zone}
+          x={margin.left}
+          y={y1}
+          width={plotWidth}
+          height={y2 - y1}
+          fill={zoneColors[zone]}
+          opacity={0.2}
+          stroke={zoneColors[zone]}
+          strokeWidth={1}
+        />
+      );
+    });
+  }
   
-  // Create zone background rectangles
-  const zoneBackgrounds = Object.entries(zoneRanges).map(([zone, [min, max]]) => {
-    const y1 = scaleY(max);
-    const y2 = scaleY(min);
-    return (
-      <rect
-        key={zone}
-        x={margin.left}
-        y={y1}
-        width={plotWidth}
-        height={y2 - y1}
-        fill={zoneColors[zone]}
-        opacity={0.2}
-        stroke={zoneColors[zone]}
-        strokeWidth={1}
-      />
-    );
-  });
-  
-  // Create the heart rate line
-  const linePoints = hrData.map((d, i) => `${scaleX(i)},${scaleY(d.heart_rate)}`).join(' ');
+  // Create the data line
+  const linePoints = data.map((d, i) => `${scaleX(i)},${scaleY(d.value)}`).join(' ');
   
   // Create grid lines
   const gridLines = [];
-  const hrStep = Math.ceil(hrRange / 10 / 10) * 10; // Round to nearest 10
-  for (let hr = Math.floor(minHR / 10) * 10; hr <= maxHR; hr += hrStep) {
-    const y = scaleY(hr);
+  const valueStep = Math.ceil(valueRange / 10 / 10) * 10; // Round to nearest 10
+  for (let value = Math.floor(minValue / 10) * 10; value <= maxValue; value += valueStep) {
+    const y = scaleY(value);
     gridLines.push(
       <line
-        key={hr}
+        key={value}
         x1={margin.left}
         y1={y}
         x2={margin.left + plotWidth}
@@ -858,8 +1052,8 @@ function HeartRatePlot({ data, zoneData, workoutType, zoneDefinitions }) {
   }
   
   // Create time grid lines
-  const timeStep = Math.ceil(hrData.length / 10);
-  for (let i = 0; i < hrData.length; i += timeStep) {
+  const timeStep = Math.ceil(data.length / 10);
+  for (let i = 0; i < data.length; i += timeStep) {
     const x = scaleX(i);
     gridLines.push(
       <line
@@ -875,69 +1069,16 @@ function HeartRatePlot({ data, zoneData, workoutType, zoneDefinitions }) {
     );
   }
   
-  // Calculate time-based x-axis labels
-  const totalDuration = hrData.length > 1 ? 
-    (new Date(hrData[hrData.length - 1].timestamp) - new Date(hrData[0].timestamp)) / 1000 / 60 : 0; // minutes
-  const labelInterval = Math.max(1, Math.ceil(totalDuration / 10)); // Show ~10 labels
-  
-  // Create time grid lines and labels
-  const timeLabels = [];
-  for (let i = 0; i < hrData.length; i += Math.ceil(hrData.length / 10)) {
-    const x = scaleX(i);
-    const dataPoint = hrData[i];
-    if (dataPoint && dataPoint.timestamp) {
-      const time = new Date(dataPoint.timestamp);
-      const minutes = Math.floor((time - new Date(hrData[0].timestamp)) / 1000 / 60);
-      
-      // Only show labels at reasonable intervals
-      if (minutes % labelInterval === 0 || i === 0 || i === hrData.length - 1) {
-        timeLabels.push(
-          <g key={`time-label-${i}`}>
-            <line
-              x1={x}
-              y1={margin.top}
-              x2={x}
-              y2={margin.top + plotHeight}
-              stroke="#e5e7eb"
-              strokeWidth="1"
-              opacity="0.5"
-            />
-            <text
-              x={x}
-              y={height - margin.bottom + 15}
-              textAnchor="middle"
-              fontSize="10"
-              fill="#6b7280"
-              transform={`rotate(-45, ${x}, ${height - margin.bottom + 15})`}
-            >
-              {`${Math.floor(minutes / 60)}:${(minutes % 60).toString().padStart(2, '0')}`}
-            </text>
-          </g>
-        );
-      }
-    }
-  }
-  
-  // Handle mouse events for hover
   const handleMouseMove = (event) => {
     const rect = event.currentTarget.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
     
-    // Find closest data point with improved precision
-    const index = Math.round(((x - margin.left) / plotWidth) * (hrData.length - 1));
-    if (index >= 0 && index < hrData.length) {
-      const dataPoint = hrData[index];
-      const time = new Date(dataPoint.timestamp);
-      const startTime = new Date(hrData[0].timestamp);
-      const elapsedMinutes = Math.floor((time - startTime) / 1000 / 60);
-      
-      setHoverData({
-        index,
-        heartRate: dataPoint.heart_rate,
-        timestamp: dataPoint.timestamp,
-        elapsedTime: `${Math.floor(elapsedMinutes / 60)}:${(elapsedMinutes % 60).toString().padStart(2, '0')}`
-      });
+    // Find closest data point
+    const index = Math.round(((x - margin.left) / plotWidth) * (data.length - 1));
+    if (index >= 0 && index < data.length) {
+      const point = data[index];
+      setHoverData(point);
       setHoverPosition({ x: event.clientX, y: event.clientY });
     }
   };
@@ -946,178 +1087,152 @@ function HeartRatePlot({ data, zoneData, workoutType, zoneDefinitions }) {
     setHoverData(null);
   };
   
-  // Format time for display
+  const formatValue = (value) => {
+    if (selectedMetric === "pace") {
+      // Convert seconds back to MM:SS format
+      const minutes = Math.floor(value / 60);
+      const seconds = Math.floor(value % 60);
+      return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    }
+    if (selectedMetric === "distance") {
+      return value.toFixed(2);
+    }
+    if (selectedMetric === "altitude") {
+      return Math.round(value);
+    }
+    return value.toFixed(1);
+  };
+  
   const formatTime = (timestamp) => {
-    if (!timestamp) return '';
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString();
+    try {
+      // Calculate elapsed time from the first data point
+      const firstTimestamp = data[0]?.timestamp;
+      if (!firstTimestamp) return timestamp;
+      
+      const startTime = new Date(firstTimestamp);
+      const currentTime = new Date(timestamp);
+      const elapsedMs = currentTime - startTime;
+      
+      // Convert to seconds
+      const totalSeconds = Math.floor(elapsedMs / 1000);
+      
+      // Format as MM:SS or HH:MM:SS
+      const hours = Math.floor(totalSeconds / 3600);
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+      const seconds = totalSeconds % 60;
+      
+      if (hours > 0) {
+        return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+      } else {
+        return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+      }
+    } catch {
+      return timestamp;
+    }
   };
   
   return (
-    <div className="heart-rate-plot-container">
-      <h4>Heart Rate Analysis</h4>
-      <div className="plot-wrapper" style={{ position: 'relative' }}>
-        <svg 
-          width={width} 
-          height={height} 
-          style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px' }}
-          onMouseMove={handleMouseMove}
-          onMouseLeave={handleMouseLeave}
-        >
-          {/* Zone backgrounds */}
-          {zoneBackgrounds}
-          
-          {/* Grid lines */}
-          {gridLines}
-          
-          {/* Time labels */}
-          {timeLabels}
-          
-          {/* Heart rate line */}
-          <polyline
-            fill="none"
-            stroke="#1f2937"
-            strokeWidth="2"
-            points={linePoints}
-          />
-          
-          {/* Axis labels */}
-          <text x={width / 2} y={height - 20} textAnchor="middle" fontSize="12" fill="#6b7280">
-            Time (MM:SS)
-          </text>
-          <text x={20} y={height / 2} textAnchor="middle" fontSize="12" fill="#6b7280" transform={`rotate(-90, 20, ${height / 2})`}>
-            Heart Rate (bpm)
-          </text>
-          
-          {/* Y-axis tick marks and labels */}
-          {Object.entries(zoneRanges).map(([zone, [min, max]]) => (
-            <g key={`tick-${zone}`}>
-              <line
-                x1={margin.left - 5}
-                y1={scaleY(max)}
-                x2={margin.left}
-                y2={scaleY(max)}
-                stroke="#6b7280"
-                strokeWidth={1}
-              />
-              <text
-                x={margin.left - 10}
-                y={scaleY(max)}
-                textAnchor="end"
-                fontSize="10"
-                fill="#6b7280"
-                dy="0.3em"
-              >
-                {max}
-              </text>
-            </g>
-          ))}
-          
-          {/* Zone labels */}
-          {Object.entries(zoneRanges).map(([zone, [min, max]], index) => {
-            const y = scaleY((min + max) / 2);
-            return (
-              <text
-                key={`label-${zone}`}
-                x={margin.left + plotWidth + 10}
-                y={y}
-                fontSize="12"
-                fill={zoneColors[zone]}
-                fontWeight="bold"
-                dy="0.3em"
-              >
-                {zone.toUpperCase()}
-              </text>
-            );
-          })}
-        </svg>
+    <div className="workout-chart">
+      <h4>{metricStyle.label}</h4>
+      <svg width={width} height={height} style={{ border: '1px solid #ccc' }}>
+        {/* Zone backgrounds */}
+        {zoneBackgrounds}
         
-        {/* Enhanced hover tooltip */}
-        {hoverData && (
-          <div
-            className="hover-tooltip"
-            style={{
-              position: 'absolute',
-              left: hoverPosition.x + 10,
-              top: hoverPosition.y - 10,
-              background: 'rgba(0, 0, 0, 0.9)',
-              color: 'white',
-              padding: '8px 12px',
-              borderRadius: '4px',
-              fontSize: '12px',
-              pointerEvents: 'none',
-              zIndex: 1000,
-              whiteSpace: 'nowrap',
-              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)'
-            }}
-          >
-            <div><strong>Time:</strong> {hoverData.elapsedTime}</div>
-            <div><strong>Heart Rate:</strong> {hoverData.heartRate} bpm</div>
-            <div><strong>Point:</strong> {hoverData.index + 1}</div>
-          </div>
-        )}
-      </div>
+        {/* Grid lines */}
+        {gridLines}
+        
+        {/* Y-axis title */}
+        <text
+          x={margin.left - 50}
+          y={margin.top + plotHeight / 2}
+          textAnchor="middle"
+          dominantBaseline="middle"
+          fontSize="14"
+          fontWeight="600"
+          fill="#374151"
+          transform={`rotate(-90, ${margin.left - 50}, ${margin.top + plotHeight / 2})`}
+        >
+          {metricStyle.label}
+        </text>
+        
+        {/* Data line */}
+        <polyline
+          points={linePoints}
+          fill="none"
+          stroke={metricStyle.color}
+          strokeWidth={2}
+        />
+        
+        {/* Data points */}
+        {data.map((point, i) => (
+          <circle
+            key={i}
+            cx={scaleX(i)}
+            cy={scaleY(point.value)}
+            r={3}
+            fill={metricStyle.color}
+            opacity={0.7}
+          />
+        ))}
+        
+        {/* Y-axis labels */}
+        {Array.from({ length: 6 }, (_, i) => {
+          const value = minValue + (valueRange * i / 5);
+          const y = scaleY(value);
+          return (
+            <text
+              key={i}
+              x={margin.left - 10}
+              y={y + 4}
+              textAnchor="end"
+              fontSize="12"
+              fill="#666"
+            >
+              {formatValue(value)}
+            </text>
+          );
+        })}
+        
+        {/* X-axis labels */}
+        {Array.from({ length: 6 }, (_, i) => {
+          const index = Math.floor((data.length - 1) * i / 5);
+          const x = scaleX(index);
+          const point = data[index];
+          return (
+            <text
+              key={i}
+              x={x}
+              y={height - margin.bottom + 20}
+              textAnchor="middle"
+              fontSize="12"
+              fill="#666"
+              transform={`rotate(-45 ${x} ${height - margin.bottom + 20})`}
+            >
+              {formatTime(point.timestamp)}
+            </text>
+          );
+        })}
+      </svg>
       
-      {/* Enhanced zone summary table */}
-      {zoneData && (
-        <div className="zone-summary-table" style={{ marginTop: '20px' }}>
-          <h5 style={{ marginBottom: '15px', color: '#374151', fontSize: '14px', fontWeight: '600' }}>
-            Zone Summary
-          </h5>
-          <div style={{ 
-            display: 'grid', 
-            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', 
-            gap: '15px',
-            background: 'white',
-            padding: '15px',
-            borderRadius: '8px',
-            border: '1px solid #e5e7eb',
-            boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)'
-          }}>
-            {Object.entries(zoneData.heart_rate_zones)
-              .filter(([zone, minutes]) => minutes > 0)
-              .map(([zone, minutes]) => {
-                const zoneName = zone.replace('_minutes', '');
-                const zoneRange = zoneRanges[zoneName];
-                const percentage = (minutes / zoneData.total_duration_minutes * 100).toFixed(1);
-                return (
-                  <div key={zone} style={{ 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    gap: '10px',
-                    padding: '10px',
-                    background: '#f9fafb',
-                    borderRadius: '6px',
-                    border: `2px solid ${zoneColors[zoneName]}`
-                  }}>
-                    <div
-                      style={{
-                        width: '16px',
-                        height: '16px',
-                        backgroundColor: zoneColors[zoneName],
-                        borderRadius: '3px'
-                      }}
-                    />
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: '600', fontSize: '14px', color: '#374151' }}>
-                        {zoneName.toUpperCase()}
-                      </div>
-                      <div style={{ fontSize: '12px', color: '#6b7280' }}>
-                        {zoneRange ? `${zoneRange[0]}-${zoneRange[1]} bpm` : 'N/A'}
-                      </div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontWeight: '600', fontSize: '14px', color: '#374151' }}>
-                        {minutes.toFixed(1)} min
-                      </div>
-                      <div style={{ fontSize: '11px', color: '#6b7280' }}>
-                        {percentage}%
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-          </div>
+      {/* Hover tooltip */}
+      {hoverData && (
+        <div
+          className="chart-tooltip"
+          style={{
+            position: 'fixed',
+            left: hoverPosition.x + 10,
+            top: hoverPosition.y - 10,
+            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+            color: 'white',
+            padding: '8px',
+            borderRadius: '4px',
+            fontSize: '12px',
+            pointerEvents: 'none',
+            zIndex: 1000
+          }}
+        >
+          <div>Time: {formatTime(hoverData.timestamp)}</div>
+          <div>{metricStyle.label}: {formatValue(hoverData.value)}</div>
         </div>
       )}
     </div>
@@ -1134,8 +1249,6 @@ function PMCChart({ pmcData, workoutsData, timeframe, setTimeframe }) {
     tsb: true,
     dailyTss: true
   });
-
-
 
   if (!pmcData || pmcData.length === 0) {
     return (
@@ -1274,7 +1387,7 @@ function PMCChart({ pmcData, workoutsData, timeframe, setTimeframe }) {
     <div className="pmc-chart-container">
       <h3>Performance Management - All Workout Types</h3>
       
-            {/* Interactive Controls */}
+      {/* Interactive Controls */}
       <div className="pmc-controls">
         <div className="metric-selector">
           <h4>Select Metrics:</h4>
@@ -1466,49 +1579,70 @@ function PMCChart({ pmcData, workoutsData, timeframe, setTimeframe }) {
             );
           })}
 
-          {/* Left Y-axis (TSS) - only if needed */}
-          {needsTssAxis && (
-            <>
+          {/* Y-axis gridlines */}
+          <g className="y-grid">
+            {tssLabels.map((tick, index) => (
               <line
+                key={index}
                 x1={padding.left}
-                y1={padding.top}
-                x2={padding.left}
-                y2={height - padding.bottom}
-                stroke="#64748b"
-                strokeWidth="2"
+                y1={scaleYTSS(tick)}
+                x2={width - padding.right}
+                y2={scaleYTSS(tick)}
+                stroke="#e5e7eb"
+                strokeWidth="1"
+                strokeDasharray="2,2"
               />
+            ))}
+          </g>
 
-              {/* Left Y-axis labels */}
-              {tssLabels.map(tss => {
-                const y = scaleYTSS(tss);
-                return (
-                  <text
-                    key={`y-tss-${tss}`}
-                    x={padding.left - 15}
-                    y={y + 4}
-                    textAnchor="end"
-                    fontSize="11"
-                    fill="#64748b"
-                  >
-                    {tss}
-                  </text>
-                );
-              })}
+          {/* Y-axis */}
+          <g className="y-axis">
+            <line
+              x1={padding.left}
+              y1={padding.top}
+              x2={padding.left}
+              y2={height - padding.bottom}
+              stroke="#64748b"
+              strokeWidth="2"
+            />
+            {/* Y-axis ticks and labels */}
+            {tssLabels.map((tick, index) => (
+              <g key={index}>
+                <line
+                  x1={padding.left - 5}
+                  y1={scaleYTSS(tick)}
+                  x2={padding.left}
+                  y2={scaleYTSS(tick)}
+                  stroke="#64748b"
+                  strokeWidth="1"
+                />
+                <text
+                  x={padding.left - 10}
+                  y={scaleYTSS(tick)}
+                  textAnchor="end"
+                  dominantBaseline="middle"
+                  fontSize="12"
+                  fill="#64748b"
+                >
+                  {tick}
+                </text>
+              </g>
+            ))}
+          </g>
 
-              {/* TSS Axis title */}
-              <text
-                x={padding.left - 40}
-                y={height / 2}
-                textAnchor="middle"
-                transform={`rotate(-90, ${padding.left - 40}, ${height / 2})`}
-                fontSize="14"
-                fill="#374151"
-                fontWeight="600"
-              >
-                TSS/d
-              </text>
-            </>
-          )}
+          {/* Y-axis title */}
+          <text
+            x={padding.left - 40}
+            y={height / 2}
+            textAnchor="middle"
+            dominantBaseline="middle"
+            fontSize="14"
+            fontWeight="600"
+            fill="#374151"
+            transform={`rotate(-90, ${padding.left - 40}, ${height / 2})`}
+          >
+            TSS/d
+          </text>
 
           {/* Right Y-axis (TSB) - only if needed */}
           {needsTsbAxis && (
@@ -1789,40 +1923,40 @@ function HealthTrendPlot({ data, title, color = "#06b6d4", unit = "" }) {
           />
         ))}
         
-        {/* X-axis date labels */}
-        {dateLabels.map((point, i) => (
-          <text
-            key={`label-${i}`}
-            x={point.x}
-            y={height + 15}
-            textAnchor="end"
-            fontSize="10"
-            fill="#64748b"
-            transform={`rotate(-45, ${point.x}, ${height + 15})`}
-          >
-            {formatDate(point.date)}
-          </text>
-        ))}
-        
         {/* Y-axis labels */}
-        <text x="10" y={height/2} textAnchor="middle" transform={`rotate(-90, 10, ${height/2})`} fontSize="12" fill="#64748b">
-          {unit}
-        </text>
-        
-        {/* Y-axis value labels */}
-        {[0, 0.25, 0.5, 0.75, 1].map((ratio, i) => {
-          const value = minValue + (maxValue - minValue) * ratio;
-          const y = height - padding - (height - 2 * padding) * ratio;
+        {Array.from({ length: 6 }, (_, i) => {
+          const value = minValue + (valueRange * i / 5);
+          const y = scaleY(value);
           return (
             <text
-              key={`y-label-${i}`}
-              x={padding - 5}
+              key={i}
+              x={margin.left - 10}
               y={y + 4}
               textAnchor="end"
-              fontSize="10"
-              fill="#64748b"
+              fontSize="12"
+              fill="#666"
             >
-              {Math.round(value)}
+              {formatValue(value)}
+            </text>
+          );
+        })}
+        
+        {/* X-axis labels */}
+        {Array.from({ length: 6 }, (_, i) => {
+          const index = Math.floor((data.length - 1) * i / 5);
+          const x = scaleX(index);
+          const point = data[index];
+          return (
+            <text
+              key={i}
+              x={x}
+              y={height - margin.bottom + 20}
+              textAnchor="middle"
+              fontSize="12"
+              fill="#666"
+              transform={`rotate(-45 ${x} ${height - margin.bottom + 20})`}
+            >
+              {formatTime(point.timestamp)}
             </text>
           );
         })}
@@ -1908,14 +2042,12 @@ function ReadinessCard({ recommendation }) {
 // PMC Dashboard component
 function PMCDashboard() {
   const [pmcData, setPmcData] = useState(null);
-  const [workoutsData, setWorkoutsData] = useState(null);
+  const [workoutsData, setWorkoutsData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [athleteId, setAthleteId] = useState("");
-  const [weekOffset, setWeekOffset] = useState(0);
-  const [timeframe, setTimeframe] = useState(30); // days
-
-
+  const [monthOffset, setMonthOffset] = useState(0);
+  const [timeframe, setTimeframe] = useState(30);
 
   // Fetch athleteId from profile
   useEffect(() => {
@@ -1933,64 +2065,42 @@ function PMCDashboard() {
     fetchProfile();
   }, []);
 
-  // Fetch PMC data and workouts
+  // Fetch PMC data
   useEffect(() => {
     if (!athleteId) return;
     setLoading(true);
     setError(null);
     
-    // Calculate date range based on week offset and timeframe
-    const today = new Date();
-    const startDate = new Date(today);
-    startDate.setDate(today.getDate() + (weekOffset * 7) - timeframe);
-    const endDate = new Date(today);
-    endDate.setDate(today.getDate() + (weekOffset * 7) + 7);
+    const month = getMonthDates(monthOffset);
+    const start = month.dates[0].toISOString().slice(0, 10);
+    const end = month.dates[month.dates.length - 1].toISOString().slice(0, 10);
     
-    const start = startDate.toISOString().slice(0, 10);
-    const end = endDate.toISOString().slice(0, 10);
-    
-    // Fetch PMC data with timeframe parameter
-    const fetchPMCData = fetch(`http://localhost:8000/api/metrics/pmc?athlete_id=${athleteId}&start_date=${start}&end_date=${end}&days=${timeframe}`)
-      .then(res => {
-        if (!res.ok) throw new Error('Failed to fetch PMC data');
+    Promise.all([
+      fetch(`http://localhost:8000/api/metrics/pmc?athlete_id=${athleteId}&start_date=${start}&end_date=${end}`),
+      fetch(`http://localhost:8000/api/workouts?athlete_id=${athleteId}&start_date=${start}&end_date=${end}`)
+    ])
+      .then(responses => Promise.all(responses.map(res => {
+        if (!res.ok) throw new Error('Failed to fetch data');
         return res.json();
-      });
-    
-    // Fetch workouts data for scatter plot
-    const fetchWorkoutsData = fetch(`http://localhost:8000/api/workouts?athlete_id=${athleteId}&start_date=${start}&end_date=${end}`)
-      .then(res => {
-        if (!res.ok) throw new Error('Failed to fetch workouts data');
-        return res.json();
-      })
-      .then(workouts => workouts.map(w => ({
-        date: w.timestamp,
-        tss: w.tss || 0
-      })));
-    
-    // Wait for both requests to complete
-    Promise.all([fetchPMCData, fetchWorkoutsData])
-      .then(([pmc, workouts]) => {
-        setPmcData(pmc);
-        setWorkoutsData(workouts);
+      })))
+      .then(([pmcResponse, workoutsResponse]) => {
+        setPmcData(pmcResponse);
+        setWorkoutsData(workoutsResponse || []);
         setLoading(false);
       })
       .catch(err => {
         setError(err.message);
         setLoading(false);
       });
-  }, [athleteId, weekOffset, timeframe]);
+  }, [athleteId, monthOffset]);
 
-  // Navigation functions
-  const goToPreviousWeek = () => setWeekOffset(prev => prev - 1);
-  const goToNextWeek = () => setWeekOffset(prev => prev + 1);
-  const goToCurrentWeek = () => setWeekOffset(0);
+  const goToPreviousMonth = () => setMonthOffset(prev => prev - 1);
+  const goToNextMonth = () => setMonthOffset(prev => prev + 1);
+  const goToCurrentMonth = () => setMonthOffset(0);
 
-  const formatWeekDisplay = () => {
-    if (weekOffset === 0) return "This Week";
-    if (weekOffset === -1) return "Last Week";
-    if (weekOffset === 1) return "Next Week";
-    if (weekOffset < 0) return `${Math.abs(weekOffset)} Weeks Ago`;
-    return `${weekOffset} Weeks Ahead`;
+  const formatMonthDisplay = () => {
+    const month = getMonthDates(monthOffset);
+    return month.monthName + ' ' + month.year;
   };
 
   if (loading) {
@@ -2009,7 +2119,7 @@ function PMCDashboard() {
     );
   }
 
-  if (!pmcData) {
+  if (!pmcData || !pmcData.metrics || pmcData.metrics.length === 0) {
     return (
       <div className="pmc-container">
         <div className="error-message">No PMC data available</div>
@@ -2023,27 +2133,27 @@ function PMCDashboard() {
         <div className="pmc-header-content">
           <button
             className="week-nav-btn"
-            onClick={goToPreviousWeek}
-            title="Previous Week"
+            onClick={goToPreviousMonth}
+            title="Previous Month"
           >
             ←
           </button>
           <div>
             <h2>Performance Management Chart</h2>
-            <p>Your training load and readiness {formatWeekDisplay()} (Timeframe: {timeframe} days)</p>
+            <p>Your training load and readiness {formatMonthDisplay()} (Timeframe: {timeframe} days)</p>
           </div>
           <button
             className="week-nav-btn"
-            onClick={goToNextWeek}
-            title="Next Week"
+            onClick={goToNextMonth}
+            title="Next Month"
           >
             →
           </button>
-          {weekOffset !== 0 && (
+          {monthOffset !== 0 && (
             <button
               className="current-week-btn"
-              onClick={goToCurrentWeek}
-              title="Go to Current Week"
+              onClick={goToCurrentMonth}
+              title="Go to Current Month"
             >
               Today
             </button>
@@ -2093,7 +2203,7 @@ function HealthAnalysis() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [athleteId, setAthleteId] = useState("");
-  const [weekOffset, setWeekOffset] = useState(0); // 0 = current week, -1 = previous week, etc.
+  const [monthOffset, setMonthOffset] = useState(0);
 
   // Fetch athleteId from profile
   useEffect(() => {
@@ -2117,19 +2227,13 @@ function HealthAnalysis() {
     setLoading(true);
     setError(null);
     
-    // Calculate date range based on week offset
-    const today = new Date();
-    const startDate = new Date(today);
-    startDate.setDate(today.getDate() + (weekOffset * 7) - 30); // 30 days before the target week
-    const endDate = new Date(today);
-    endDate.setDate(today.getDate() + (weekOffset * 7) + 7); // 7 days after the target week
-    
-    const start = startDate.toISOString().slice(0, 10);
-    const end = endDate.toISOString().slice(0, 10);
+    const month = getMonthDates(monthOffset);
+    const start = month.dates[0].toISOString().slice(0, 10);
+    const end = month.dates[month.dates.length - 1].toISOString().slice(0, 10);
     
     fetch(`http://localhost:8000/api/health/analysis?athlete_id=${athleteId}&start_date=${start}&end_date=${end}`)
       .then(res => {
-        if (!res.ok) throw new Error('Failed to fetch health data');
+        if (!res.ok) throw new Error('Failed to fetch health analysis');
         return res.json();
       })
       .then(data => {
@@ -2140,19 +2244,15 @@ function HealthAnalysis() {
         setError(err.message);
         setLoading(false);
       });
-  }, [athleteId, weekOffset]);
+  }, [athleteId, monthOffset]);
 
-  // Navigation functions
-  const goToPreviousWeek = () => setWeekOffset(prev => prev - 1);
-  const goToNextWeek = () => setWeekOffset(prev => prev + 1);
-  const goToCurrentWeek = () => setWeekOffset(0);
+  const goToPreviousMonth = () => setMonthOffset(prev => prev - 1);
+  const goToNextMonth = () => setMonthOffset(prev => prev + 1);
+  const goToCurrentMonth = () => setMonthOffset(0);
 
-  const formatWeekDisplay = () => {
-    if (weekOffset === 0) return "This Week";
-    if (weekOffset === -1) return "Last Week";
-    if (weekOffset === 1) return "Next Week";
-    if (weekOffset < 0) return `${Math.abs(weekOffset)} Weeks Ago`;
-    return `${weekOffset} Weeks Ahead`;
+  const formatMonthDisplay = () => {
+    const month = getMonthDates(monthOffset);
+    return month.monthName + ' ' + month.year;
   };
 
   if (loading) {
@@ -2185,27 +2285,32 @@ function HealthAnalysis() {
         <div className="health-header-content">
           <button
             className="week-nav-btn"
-            onClick={goToPreviousWeek}
-            title="Previous Week"
+            onClick={goToPreviousMonth}
+            title="Previous Month"
           >
             ←
           </button>
           <div>
-            <h2>Health & Recovery Analysis</h2>
-            <p>Analysis of your sleep, HRV, and RHR trends {formatWeekDisplay()}</p>
+            <h2>Health Analysis</h2>
+            <div className="month-navigation">
+              <button onClick={goToPreviousMonth}>&lt; Previous Month</button>
+              <button onClick={goToCurrentMonth} className="current-btn">Current Month</button>
+              <button onClick={goToNextMonth}>Next Month &gt;</button>
+            </div>
+            <div className="month-display">{formatMonthDisplay()}</div>
           </div>
           <button
             className="week-nav-btn"
-            onClick={goToNextWeek}
-            title="Next Week"
+            onClick={goToNextMonth}
+            title="Next Month"
           >
             →
           </button>
-          {weekOffset !== 0 && (
+          {monthOffset !== 0 && (
             <button
               className="current-week-btn"
-              onClick={goToCurrentWeek}
-              title="Go to Current Week"
+              onClick={goToCurrentMonth}
+              title="Go to Current Month"
             >
               Today
             </button>
