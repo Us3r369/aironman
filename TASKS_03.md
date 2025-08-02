@@ -102,38 +102,111 @@ Goal: Users can edit their profile in the web-app. Each edit inserts a **new** r
 
 ---
 
-## 3  Recovery dashboard – intelligent summary agent
+## 3  Recovery dashboard – intelligent agent analysis
 
-We'll create a new agent `recovery_analysis_agent.py` that synthesises sleep, HRV, RHR and training load to output **status**, **score 0-100**, and **recommendation**.
+**Goal**: Replace static recovery analysis with an intelligent CrewAI agent that analyzes RHR, HRV, sleep, and training load to provide dynamic status, detailed reasoning, and recommendations.
 
-### 3.1  Data ingestion helpers
-- [ ] Queries to collect last N-days of:
-  ∘ `sleep` duration & quality  
-  ∘ `hrv` (rmssd)  
-  ∘ `rhr`  
-  ∘ `training_status` (CTL, ATL, TSB)
-- [ ] Normalise to daily records.
+### 3.1  Database Schema
+- [ ] Create `daily_recovery_analysis` table:
+  ```sql
+  CREATE TABLE daily_recovery_analysis (
+      id SERIAL PRIMARY KEY,
+      athlete_id UUID REFERENCES athlete(id),
+      analysis_date DATE NOT NULL,
+      status VARCHAR(10) NOT NULL, -- 'good', 'medium', 'bad'
+      detailed_reasoning TEXT NOT NULL,
+      agent_analysis JSONB, -- Store full agent response
+      created_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(athlete_id, analysis_date)
+  );
+  ```
+- [ ] Add database migration file `005_create_recovery_analysis.sql`
+- [ ] Add indices for performance: `(athlete_id, analysis_date)`
 
-### 3.2  Heuristics / model
-- **Baseline windows**: 30-day trailing average for each metric.
-- **Deviation scoring**: z-score or % change vs baseline, weighted:
-  • HRV (-)  • RHR (+)  • Sleep (-)  • TSB (+)
-- Map combined score to status: `good ≥70`, `moderate 40-69`, `poor <40`.
-- Provide explanation list (e.g., "HRV down 15%, RHR up 10 bpm").
+### 3.2  Agent Infrastructure (CrewAI) ✅ **COMPLETE**
+- [x] Install CrewAI dependencies in `requirements.txt`
+- [x] Create `agents/recovery_analysis_agent.py` with:
+  - **Recovery Analysis Agent**: Main agent for analysis ✅
+  - **Health Metrics Tool**: Extract RHR, HRV, sleep data (3-7 day trends) ✅
+  - **Training Load Tool**: Extract TSB, CTL, ATL data ✅
+  - **Trend Analysis Tool**: Analyze patterns and flag acute spikes/drops ✅
+  - **Recovery Assessment Tool**: Generate status and detailed reasoning ✅
+- [x] Agent logic:
+  - Use TSB for load management context ✅
+  - Analyze 3-7 day trends in HRV, sleep, RHR for readiness scoring ✅
+  - Flag acute spikes/drops as warning signals ✅
+  - Generate status: `good`/`medium`/`bad` ✅
+  - Provide detailed reasoning with specific insights ✅
 
-### 3.3  Agent implementation
-- Deterministic rules first; later swap to ML if desired.
-- Function `analyze_recovery(athlete_id, range_days=14) -> dict`.
-- Place in `agents/recovery_analysis_agent.py` with unit tests for edge cases.
+### 3.3  Backend API
+- [ ] **New endpoint**: `POST /api/health/agent-analysis`
+  - Triggers agent analysis for current athlete
+  - Returns: `{status, detailed_reasoning, analysis_date, last_updated}`
+  - Store result in `daily_recovery_analysis` table
+- [ ] **Updated endpoint**: `GET /api/health/analysis`
+  - Return latest agent analysis from database
+  - Include `last_updated` timestamp
+  - Fallback to static analysis if no agent data available
+- [ ] **Agent execution function**: `execute_recovery_analysis(athlete_id)`
+  - Call CrewAI agent with athlete data
+  - Handle errors gracefully
+  - Return structured response
 
-### 3.4  API integration
-1. Replace stub logic in `GET /api/health/recovery-status`, `/readiness`, `/analysis` to call the agent.
-2. Response models unchanged (already defined in `api/main.py`).
-3. Add integration test with seeded demo data.
+### 3.4  Frontend Integration ✅ **COMPLETE**
+- [x] **Combined Recovery Status Card** (top center of health page):
+  - Merge current `RecoveryStatusCard` and `ReadinessCard` into single component ✅
+  - Display: status (good/medium/bad), detailed reasoning, last updated timestamp ✅
+  - Add refresh button to trigger new agent analysis ✅
+  - Show loading state during agent execution ✅
+- [x] **Agent Analysis Display**:
+  - Show detailed reasoning from agent ✅
+  - Display status with appropriate color coding ✅
+  - Show "Last updated: [timestamp]" with refresh button ✅
+- [x] **Error Handling**:
+  - Handle agent execution failures gracefully ✅
+  - Show fallback to static analysis if needed ✅
+  - Display user-friendly error messages ✅
 
-### 3.5  Frontend
-- Dashboard shows status icon (green / yellow / red), score, and bullet reasons.
-- Add tooltip linking to underlying metrics.
+### 3.5  Data Analysis Requirements ✅ **COMPLETE**
+- [x] **Enhanced Health Metrics Analysis**:
+  - RHR trends (3-7 days): Flag increases as negative with severity levels ✅
+  - HRV trends (3-7 days): Flag decreases as negative with severity levels ✅
+  - Sleep quality trends (3-7 days): Flag decreases as negative with severity levels ✅
+  - Data quality assessment: Poor/moderate/good based on data points ✅
+  - Acute spike/drop detection: Enhanced with severity levels ✅
+- [x] **Enhanced Training Load Context**:
+  - TSB analysis: Recovery (>10), Balanced (0-10), Moderate stress (<0), High stress (<-10) ✅
+  - Load assessment: Recovery, balanced, moderate_stress, high_stress ✅
+  - Recent TSS tracking: Total TSS and workout count ✅
+  - Load context: Detailed TSB, CTL, ATL analysis ✅
+- [x] **Enhanced Agent Reasoning**:
+  - Specific insights: "Your RHR is high and sleep was poor, so yellow status" ✅
+  - Trend analysis: Detailed percentage changes and recommendations ✅
+  - Comprehensive reasoning: Status + factors + recommendations + trend-specific advice ✅
+  - Enhanced scoring: More nuanced scoring system (60+ good, 30+ medium, <30 bad) ✅
+
+### 3.6  Testing & Validation ✅ **COMPLETE**
+- [x] **Unit Tests**:
+  - Agent tests: Test all CrewAI tools and agent execution ✅
+  - API tests: Test all FastAPI endpoints with TestClient ✅
+  - Database tests: Test database utilities and connection handling ✅
+  - Service tests: Test PMC metrics, zones, sync, preprocessing ✅
+  - Error handling tests: Test exception scenarios ✅
+- [x] **Integration Tests**:
+  - End-to-end API testing with mocked dependencies ✅
+  - Database integration testing with mocked connections ✅
+  - Agent execution testing with mocked CrewAI responses ✅
+- [x] **Test Infrastructure**:
+  - pytest configuration with coverage reporting ✅
+  - Pre-commit hooks for automated testing ✅
+  - Comprehensive test runner script ✅
+  - Test documentation and examples ✅
+- [x] **Code Quality**:
+  - Black formatting with 88 character line length ✅
+  - isort import sorting ✅
+  - flake8 linting with custom rules ✅
+  - bandit security scanning ✅
+  - 80%+ coverage requirement ✅
 
 ---
 

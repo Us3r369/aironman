@@ -360,3 +360,31 @@ def get_active_profile(athlete_id: Optional[str] = None) -> Optional[Dict[str, A
                 return None
 
             return _parse_profile_row(row) 
+
+def test_recovery_analysis_table():
+    """Test if the daily_recovery_analysis table exists and is accessible."""
+    with get_db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'daily_recovery_analysis'
+                );
+            """)
+            exists = cur.fetchone()[0]
+            if exists:
+                # Test inserting a dummy record
+                cur.execute("""
+                    INSERT INTO daily_recovery_analysis 
+                    (athlete_id, analysis_date, status, detailed_reasoning) 
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (athlete_id, analysis_date) DO NOTHING
+                """, (
+                    '1a5d4210-bfcc-4b1a-8b37-8e42e83524e9',  # Test athlete ID
+                    '2025-08-02',  # Today's date
+                    'good',
+                    'Test analysis - table is working'
+                ))
+                conn.commit()
+                return True
+            return False 

@@ -506,9 +506,10 @@ function WorkoutsView() {
   const [availableMetrics, setAvailableMetrics] = useState(["hr"]);
   const [metricLoading, setMetricLoading] = useState(false);
 
-  // URL query parameter management
-  const updateURL = (workoutId, metric) => {
+  // URL query parameter management - only for workouts context
+  const updateWorkoutURL = (workoutId, metric) => {
     const url = new URL(window.location);
+    // Only update workout-specific parameters, preserve other navigation state
     if (workoutId) {
       url.searchParams.set('workout', workoutId);
     } else {
@@ -522,7 +523,7 @@ function WorkoutsView() {
     window.history.replaceState({}, '', url);
   };
 
-  const getURLParams = () => {
+  const getWorkoutURLParams = () => {
     const url = new URL(window.location);
     return {
       workoutId: url.searchParams.get('workout'),
@@ -532,7 +533,7 @@ function WorkoutsView() {
 
   // Initialize from URL on component mount
   useEffect(() => {
-    const { workoutId, metric } = getURLParams();
+    const { workoutId, metric } = getWorkoutURLParams();
     if (workoutId && workoutId !== selectedWorkout) {
       setSelectedWorkout(workoutId);
     }
@@ -543,25 +544,25 @@ function WorkoutsView() {
 
   // Update URL when workout or metric changes
   useEffect(() => {
-    updateURL(selectedWorkout, selectedMetric);
+    updateWorkoutURL(selectedWorkout, selectedMetric);
   }, [selectedWorkout, selectedMetric]);
 
   // Handle metric change with URL update
   const handleMetricChange = (newMetric) => {
     setSelectedMetric(newMetric);
-    updateURL(selectedWorkout, newMetric);
+    updateWorkoutURL(selectedWorkout, newMetric);
   };
 
   // Handle workout selection with URL update
   const handleWorkoutSelect = (workoutId) => {
     setSelectedWorkout(workoutId);
-    updateURL(workoutId, selectedMetric);
+    updateWorkoutURL(workoutId, selectedMetric);
   };
 
   // Handle workout close with URL update
   const handleWorkoutClose = () => {
     setSelectedWorkout(null);
-    updateURL(null, selectedMetric);
+    updateWorkoutURL(null, selectedMetric);
   };
 
   // Fetch athleteId from profile (assume single athlete for now)
@@ -1854,6 +1855,7 @@ function HealthTrendPlot({ data, title, color = "#06b6d4", unit = "" }) {
   const height = 200;
   const padding = 40;
   const labelHeight = 30; // Extra space for rotated labels
+  const margin = { top: 20, right: 20, bottom: 40, left: 50 };
 
   // Parse dates and get min/max values
   const dates = data.map(d => new Date(d.date));
@@ -1862,10 +1864,24 @@ function HealthTrendPlot({ data, title, color = "#06b6d4", unit = "" }) {
   const maxDate = new Date(Math.max(...dates));
   const minValue = Math.min(...values);
   const maxValue = Math.max(...values);
+  const valueRange = maxValue - minValue;
 
   // Scale functions
   const scaleX = x => padding + ((x - minDate) / (maxDate - minDate)) * (width - 2 * padding);
   const scaleY = y => height - padding - ((y - minValue) / (maxValue - minValue)) * (height - 2 * padding);
+
+  // Helper functions
+  const formatValue = (value) => {
+    if (unit === "score") return Math.round(value);
+    if (unit === "ms") return Math.round(value);
+    if (unit === "bpm") return Math.round(value);
+    return value.toFixed(1);
+  };
+
+  const formatDate = (dateStr) => {
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
 
   // Create line path
   const linePath = data.map((d, i) => {
@@ -1880,12 +1896,6 @@ function HealthTrendPlot({ data, title, color = "#06b6d4", unit = "" }) {
     const y = scaleY(d.value);
     return { x, y, value: d.value, date: d.date };
   });
-
-  // Format date for display
-  const formatDate = (dateStr) => {
-    const date = new Date(dateStr);
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  };
 
   // Add x-axis date labels (show every 3rd point to avoid crowding)
   const dateLabels = points.filter((_, i) => i % 3 === 0 || i === points.length - 1);
@@ -1942,24 +1952,19 @@ function HealthTrendPlot({ data, title, color = "#06b6d4", unit = "" }) {
         })}
         
         {/* X-axis labels */}
-        {Array.from({ length: 6 }, (_, i) => {
-          const index = Math.floor((data.length - 1) * i / 5);
-          const x = scaleX(index);
-          const point = data[index];
-          return (
-            <text
-              key={i}
-              x={x}
-              y={height - margin.bottom + 20}
-              textAnchor="middle"
-              fontSize="12"
-              fill="#666"
-              transform={`rotate(-45 ${x} ${height - margin.bottom + 20})`}
-            >
-              {formatTime(point.timestamp)}
-            </text>
-          );
-        })}
+        {dateLabels.map((point, i) => (
+          <text
+            key={i}
+            x={point.x}
+            y={height - margin.bottom + 20}
+            textAnchor="middle"
+            fontSize="12"
+            fill="#666"
+            transform={`rotate(-45 ${point.x} ${height - margin.bottom + 20})`}
+          >
+            {formatDate(point.date)}
+          </text>
+        ))}
       </svg>
     </div>
   );
@@ -2035,6 +2040,127 @@ function ReadinessCard({ recommendation }) {
         <h4>Reasoning:</h4>
         <p>{recommendation.reasoning}</p>
       </div>
+    </div>
+  );
+}
+
+// Combined Recovery Status Card with Agent Analysis
+function CombinedRecoveryCard({ agentAnalysis, onRefresh, isRefreshing }) {
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'good': return '#10b981';
+      case 'medium': return '#f59e0b';
+      case 'bad': return '#ef4444';
+      default: return '#6b7280';
+    }
+  };
+
+  const getStatusText = (status) => {
+    switch (status) {
+      case 'good': return 'Good Recovery';
+      case 'medium': return 'Moderate Recovery';
+      case 'bad': return 'Poor Recovery';
+      default: return 'Unknown Status';
+    }
+  };
+
+  const getRecommendationText = (status) => {
+    switch (status) {
+      case 'good': return 'Continue with current training plan';
+      case 'medium': return 'Consider reducing training intensity or adding recovery days';
+      case 'bad': return 'Recommend rest day or very light training. Focus on sleep and recovery';
+      default: return 'No recommendation available';
+    }
+  };
+
+  if (!agentAnalysis) {
+    return (
+      <div className="recovery-status-card">
+        <div className="card-header">
+          <h3>Recovery Status</h3>
+          <button 
+            onClick={onRefresh} 
+            disabled={isRefreshing}
+            className="refresh-btn"
+            title="Refresh Analysis"
+          >
+            {isRefreshing ? '⏳' : '🔄'}
+          </button>
+        </div>
+        <div className="no-analysis">
+          <p>No agent analysis available</p>
+          <button onClick={onRefresh} disabled={isRefreshing} className="primary-btn">
+            {isRefreshing ? 'Analyzing...' : 'Run Analysis'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="recovery-status-card">
+      <div className="card-header">
+        <h3>Recovery Status</h3>
+        <button 
+          onClick={onRefresh} 
+          disabled={isRefreshing}
+          className="refresh-btn"
+          title="Refresh Analysis"
+        >
+          {isRefreshing ? '⏳' : '🔄'}
+        </button>
+      </div>
+      
+      <div className="status-section">
+        <div className="status-indicator" style={{ backgroundColor: getStatusColor(agentAnalysis.status) }}>
+          {getStatusText(agentAnalysis.status)}
+        </div>
+        <div className="last-updated">
+          Last updated: {new Date(agentAnalysis.last_updated).toLocaleString()}
+        </div>
+      </div>
+
+      <div className="detailed-reasoning">
+        <h4>Analysis Details</h4>
+        <p>{agentAnalysis.detailed_reasoning}</p>
+      </div>
+
+      <div className="recommendation-section">
+        <h4>Recommendation</h4>
+        <p>{getRecommendationText(agentAnalysis.status)}</p>
+      </div>
+
+      {agentAnalysis.agent_analysis && agentAnalysis.agent_analysis.trend_analysis && (
+        <div className="trend-summary">
+          <h4>Trend Summary</h4>
+          <div className="trend-items">
+            {agentAnalysis.agent_analysis.trend_analysis.rhr_trend && (
+              <div className="trend-item">
+                <span className="trend-label">RHR:</span>
+                <span className={`trend-value ${agentAnalysis.agent_analysis.trend_analysis.rhr_trend.direction}`}>
+                  {agentAnalysis.agent_analysis.trend_analysis.rhr_trend.direction}
+                </span>
+              </div>
+            )}
+            {agentAnalysis.agent_analysis.trend_analysis.hrv_trend && (
+              <div className="trend-item">
+                <span className="trend-label">HRV:</span>
+                <span className={`trend-value ${agentAnalysis.agent_analysis.trend_analysis.hrv_trend.direction}`}>
+                  {agentAnalysis.agent_analysis.trend_analysis.hrv_trend.direction}
+                </span>
+              </div>
+            )}
+            {agentAnalysis.agent_analysis.trend_analysis.sleep_trend && (
+              <div className="trend-item">
+                <span className="trend-label">Sleep:</span>
+                <span className={`trend-value ${agentAnalysis.agent_analysis.trend_analysis.sleep_trend.direction}`}>
+                  {agentAnalysis.agent_analysis.trend_analysis.sleep_trend.direction}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2204,6 +2330,8 @@ function HealthAnalysis() {
   const [error, setError] = useState(null);
   const [athleteId, setAthleteId] = useState("");
   const [monthOffset, setMonthOffset] = useState(0);
+  const [agentAnalysis, setAgentAnalysis] = useState(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Fetch athleteId from profile
   useEffect(() => {
@@ -2231,13 +2359,14 @@ function HealthAnalysis() {
     const start = month.dates[0].toISOString().slice(0, 10);
     const end = month.dates[month.dates.length - 1].toISOString().slice(0, 10);
     
-    fetch(`http://localhost:8000/api/health/analysis?athlete_id=${athleteId}&start_date=${start}&end_date=${end}`)
+    fetch(`http://localhost:8000/api/health/analysis?start_date=${start}&end_date=${end}`)
       .then(res => {
         if (!res.ok) throw new Error('Failed to fetch health analysis');
         return res.json();
       })
       .then(data => {
         setHealthData(data);
+        setAgentAnalysis(data.agent_analysis);
         setLoading(false);
       })
       .catch(err => {
@@ -2245,6 +2374,50 @@ function HealthAnalysis() {
         setLoading(false);
       });
   }, [athleteId, monthOffset]);
+
+  // Trigger agent analysis
+  const handleRefreshAnalysis = async () => {
+    setIsRefreshing(true);
+    setError(null);
+    
+    try {
+      const response = await fetch('http://localhost:8000/api/health/agent-analysis', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to trigger agent analysis');
+      }
+      
+      const result = await response.json();
+      setAgentAnalysis({
+        status: result.status,
+        detailed_reasoning: result.detailed_reasoning,
+        last_updated: result.last_updated,
+        agent_analysis: result
+      });
+      
+      // Refresh health data to get updated analysis
+      const month = getMonthDates(monthOffset);
+      const start = month.dates[0].toISOString().slice(0, 10);
+      const end = month.dates[month.dates.length - 1].toISOString().slice(0, 10);
+      
+      const healthResponse = await fetch(`http://localhost:8000/api/health/analysis?start_date=${start}&end_date=${end}`);
+      if (healthResponse.ok) {
+        const healthData = await healthResponse.json();
+        setHealthData(healthData);
+      }
+      
+    } catch (err) {
+      setError(`Agent analysis failed: ${err.message}`);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   const goToPreviousMonth = () => setMonthOffset(prev => prev - 1);
   const goToNextMonth = () => setMonthOffset(prev => prev + 1);
@@ -2267,6 +2440,9 @@ function HealthAnalysis() {
     return (
       <div className="health-container">
         <div className="error-message">{error}</div>
+        <button onClick={handleRefreshAnalysis} disabled={isRefreshing} className="primary-btn">
+          {isRefreshing ? 'Retrying...' : 'Retry Analysis'}
+        </button>
       </div>
     );
   }
@@ -2319,6 +2495,17 @@ function HealthAnalysis() {
       </div>
 
       <div className="health-content">
+        {/* Recovery Analysis Card - Top Center */}
+        <div className="recovery-section">
+          <div className="analysis-grid">
+            <CombinedRecoveryCard 
+              agentAnalysis={agentAnalysis} 
+              onRefresh={handleRefreshAnalysis} 
+              isRefreshing={isRefreshing}
+            />
+          </div>
+        </div>
+
         <div className="trends-section">
           <h3>Health Trends</h3>
           <div className="trends-grid">
@@ -2340,13 +2527,6 @@ function HealthAnalysis() {
               color="#f59e0b" 
               unit="bpm"
             />
-          </div>
-        </div>
-
-        <div className="analysis-section">
-          <div className="analysis-grid">
-            <RecoveryStatusCard status={healthData.recovery_status} />
-            <ReadinessCard recommendation={healthData.readiness_recommendation} />
           </div>
         </div>
       </div>

@@ -691,91 +691,213 @@ body.modal-open {
   margin-top: 32px;
 }
 
-.analysis-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
-  gap: 24px;
-}
-
-.recovery-status-card,
-.readiness-card {
+/* Combined Recovery Status Card Styles */
+.recovery-status-card {
   background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
   border: 1px solid #475569;
   border-radius: 12px;
   padding: 24px;
   color: white;
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-  transition: transform 0.2s, box-shadow 0.2s;
+  transition: all 0.3s ease;
+  position: relative;
 }
 
-.recovery-status-card:hover,
-.readiness-card:hover {
+.recovery-status-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 10px 25px -3px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 8px 12px -1px rgba(0, 0, 0, 0.15);
 }
 
-.recovery-status-card h3,
-.readiness-card h3 {
-  color: #06b6d4;
-  font-size: 1.5rem;
-  font-weight: 700;
-  margin: 0 0 20px 0;
-  text-align: center;
-}
-
-.status-indicator,
-.recommendation-indicator {
-  text-align: center;
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   margin-bottom: 20px;
 }
 
-.status-score,
-.confidence-score {
-  font-size: 2rem;
-  font-weight: 800;
+.card-header h3 {
+  color: white;
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0;
+}
+
+.refresh-btn {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  color: white;
+  padding: 8px 12px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.refresh-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.2);
+  transform: scale(1.05);
+}
+
+.refresh-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.status-section {
+  margin-bottom: 20px;
+}
+
+.status-indicator {
+  display: inline-block;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
   margin-bottom: 8px;
 }
 
-.status-text,
-.recommendation-text {
-  font-size: 1.2rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+.last-updated {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.7);
+  margin-top: 8px;
 }
 
-.status-factors h4,
-.reasoning h4 {
-  color: #06b6d4;
+.detailed-reasoning {
+  margin-bottom: 20px;
+}
+
+.detailed-reasoning h4 {
+  color: white;
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 0 0 8px 0;
+}
+
+.detailed-reasoning p {
+  color: rgba(255, 255, 255, 0.9);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.recommendation-section {
+  margin-bottom: 20px;
+}
+
+.recommendation-section h4 {
+  color: white;
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 0 0 8px 0;
+}
+
+.recommendation-section p {
+  color: rgba(255, 255, 255, 0.9);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.trend-summary {
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+  padding-top: 16px;
+}
+
+.trend-summary h4 {
+  color: white;
   font-size: 1.1rem;
   font-weight: 600;
   margin: 0 0 12px 0;
 }
 
-.status-factors ul {
-  list-style: none;
-  padding: 0;
-  margin: 0;
+.trend-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.status-factors li {
-  color: #e2e8f0;
-  margin-bottom: 8px;
-  padding-left: 16px;
-  position: relative;
+.trend-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
 }
 
-.status-factors li:before {
-  content: "•";
-  color: #06b6d4;
-  position: absolute;
-  left: 0;
+.trend-label {
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.9);
 }
 
-.reasoning p {
-  color: #e2e8f0;
-  line-height: 1.6;
-  margin: 0;
+.trend-value {
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  text-transform: capitalize;
+}
+
+.trend-value.improving {
+  background: rgba(16, 185, 129, 0.2);
+  color: #10b981;
+}
+
+.trend-value.declining {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+}
+
+.trend-value.stable {
+  background: rgba(107, 114, 128, 0.2);
+  color: #6b7280;
+}
+
+.trend-value.insufficient_data {
+  background: rgba(107, 114, 128, 0.2);
+  color: #6b7280;
+  font-style: italic;
+}
+
+.no-analysis {
+  text-align: center;
+  padding: 40px 20px;
+}
+
+.no-analysis p {
+  color: rgba(255, 255, 255, 0.7);
+  margin-bottom: 20px;
+}
+
+.primary-btn {
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 12px 24px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.primary-btn:hover:not(:disabled) {
+  background: #2563eb;
+  transform: translateY(-1px);
+}
+
+.primary-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Update analysis grid to center the single card */
+.analysis-grid {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 24px;
+  max-width: 600px;
+  margin: 0 auto;
 }
 .calendar-table {
   width: 100%;

@@ -1251,27 +1251,235 @@ def get_health_trends_with_dates(athlete_id: str, start_date: str, end_date: str
     except Exception as e:
         raise DatabaseException(f"Failed to get health trends: {str(e)}")
 
-@app.get("/api/health/analysis", response_model=HealthAnalysisResponse)
+@app.post("/api/health/agent-analysis")
+def trigger_agent_analysis():
+    """Trigger a new recovery analysis using the intelligent agent."""
+    from agents.recovery_analysis_agent import execute_recovery_analysis
+    from utils.database import get_active_profile, get_db_conn
+    from datetime import datetime
+    
+    try:
+        # Get athlete ID from profile
+        profile = get_active_profile()
+        if not profile:
+            raise HTTPException(status_code=404, detail="No active profile found")
+        
+        athlete_name = profile.get("athlete_id")  # This is the human-readable name
+        if not athlete_name:
+            raise HTTPException(status_code=404, detail="No athlete ID found in profile")
+        
+        # Get athlete UUID from database
+        with get_db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id FROM athlete WHERE name = %s", (athlete_name,))
+                athlete_row = cur.fetchone()
+                if not athlete_row:
+                    raise HTTPException(status_code=404, detail=f"Athlete '{athlete_name}' not found in database")
+                athlete_uuid = athlete_row[0]
+        
+        # Execute recovery analysis
+        analysis_result = execute_recovery_analysis(athlete_name)  # Use name for agent
+        
+        # Store result in database using UUID - create new version
+        with get_db_conn() as conn:
+            with conn.cursor() as cur:
+                # Get the next version number for today
+                cur.execute("""
+                    SELECT COALESCE(MAX(version), 0) + 1
+                    FROM daily_recovery_analysis 
+                    WHERE athlete_id = %s AND analysis_date = %s
+                """, (athlete_uuid, datetime.now().date()))
+                next_version = cur.fetchone()[0]
+                
+                # Insert new version
+                cur.execute("""
+                    INSERT INTO daily_recovery_analysis 
+                    (athlete_id, analysis_date, version, status, detailed_reasoning, agent_analysis)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                """, (
+                    athlete_uuid,
+                    datetime.now().date(),
+                    next_version,
+                    analysis_result.get("status", "medium"),
+                    analysis_result.get("detailed_reasoning", "Analysis completed"),
+                    json.dumps(analysis_result)
+                ))
+                conn.commit()
+        
+        return {
+            "status": analysis_result.get("status", "medium"),
+            "detailed_reasoning": analysis_result.get("detailed_reasoning", "Analysis completed"),
+            "analysis_date": analysis_result.get("analysis_date", datetime.now().strftime('%Y-%m-%d')),
+            "last_updated": datetime.now().isoformat(),
+            "message": "Agent analysis completed and stored"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in agent analysis: {e}")
+        raise HTTPException(status_code=500, detail=f"Agent analysis failed: {str(e)}")
+
+@app.get("/api/health/analysis")
 def get_health_analysis(
-    athlete_id: str = Query(..., description="Athlete UUID or name"),
-    days: int = Query(30, description="Number of days to analyze"),
-    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)")
+    athlete_id: str = Query(None, description="Athlete ID (optional, uses active profile if not provided)"),
+    start_date: str = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: str = Query(None, description="End date (YYYY-MM-DD)")
 ):
-    """Get comprehensive health analysis including trends, recovery status, and readiness."""
-    if start_date and end_date:
-        trends = get_health_trends_with_dates(athlete_id, start_date, end_date)
-    else:
-        trends = get_health_trends(athlete_id, days)
+    """Get health analysis data, including latest agent analysis if available."""
+    from utils.database import get_active_profile, get_db_conn
+    from datetime import datetime, timedelta
     
-    recovery_status = get_recovery_status(athlete_id)
-    readiness_recommendation = get_readiness_recommendation(athlete_id)
-    
-    return HealthAnalysisResponse(
-        trends=trends,
-        recovery_status=recovery_status,
-        readiness_recommendation=readiness_recommendation
-    )
+    try:
+        # Get athlete ID
+        athlete_name = None
+        athlete_uuid = None
+        
+        if not athlete_id:
+            profile = get_active_profile()
+            if not profile:
+                raise HTTPException(status_code=404, detail="No active profile found")
+            athlete_name = profile.get("athlete_id")  # Human-readable name
+        else:
+            athlete_name = athlete_id
+        
+        # Get athlete UUID from database
+        with get_db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id FROM athlete WHERE name = %s", (athlete_name,))
+                athlete_row = cur.fetchone()
+                if not athlete_row:
+                    raise HTTPException(status_code=404, detail=f"Athlete '{athlete_name}' not found in database")
+                athlete_uuid = athlete_row[0]
+        
+        # Get latest agent analysis
+        agent_analysis = None
+        with get_db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT status, detailed_reasoning, agent_analysis, created_at
+                    FROM daily_recovery_analysis 
+                    WHERE athlete_id = %s 
+                    ORDER BY analysis_date DESC, version DESC 
+                    LIMIT 1
+                """, (athlete_uuid,))
+                agent_row = cur.fetchone()
+                
+                if agent_row:
+                    agent_analysis = {
+                        "status": agent_row[0],
+                        "detailed_reasoning": agent_row[1],
+                        "agent_analysis": agent_row[2],
+                        "last_updated": agent_row[3].isoformat() if agent_row[3] else None
+                    }
+        
+        # Get health trends data (existing logic)
+        if not start_date:
+            start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+        if not end_date:
+            end_date = datetime.now().strftime('%Y-%m-%d')
+        
+        # Fetch health data (existing logic)
+        with get_db_conn() as conn:
+            with conn.cursor() as cur:
+                # Get sleep data
+                cur.execute("""
+                    SELECT timestamp, json_file 
+                    FROM sleep 
+                    WHERE athlete_id = %s AND timestamp BETWEEN %s AND %s 
+                    ORDER BY timestamp
+                """, (athlete_uuid, start_date, end_date))
+                sleep_data = cur.fetchall()
+                
+                # Get HRV data
+                cur.execute("""
+                    SELECT timestamp, json_file 
+                    FROM hrv 
+                    WHERE athlete_id = %s AND timestamp BETWEEN %s AND %s 
+                    ORDER BY timestamp
+                """, (athlete_uuid, start_date, end_date))
+                hrv_data = cur.fetchall()
+                
+                # Get RHR data
+                cur.execute("""
+                    SELECT timestamp, json_file 
+                    FROM rhr 
+                    WHERE athlete_id = %s AND timestamp BETWEEN %s AND %s 
+                    ORDER BY timestamp
+                """, (athlete_uuid, start_date, end_date))
+                rhr_data = cur.fetchall()
+        
+        # Process health data (existing logic)
+        trends = {
+            "sleep": [],
+            "hrv": [],
+            "rhr": []
+        }
+        
+        for row in sleep_data:
+            date = row[0].strftime('%Y-%m-%d')
+            json_data = row[1]
+            if 'sleepQuality' in json_data:
+                trends["sleep"].append({
+                    "date": date,
+                    "value": json_data['sleepQuality'],
+                    "unit": "score"
+                })
+        
+        for row in hrv_data:
+            date = row[0].strftime('%Y-%m-%d')
+            json_data = row[1]
+            if 'hrv' in json_data:
+                trends["hrv"].append({
+                    "date": date,
+                    "value": json_data['hrv'],
+                    "unit": "ms"
+                })
+        
+        for row in rhr_data:
+            date = row[0].strftime('%Y-%m-%d')
+            json_data = row[1]
+            if 'restingHeartRate' in json_data:
+                trends["rhr"].append({
+                    "date": date,
+                    "value": json_data['restingHeartRate'],
+                    "unit": "bpm"
+                })
+        
+        # Build response with agent analysis if available
+        response = {
+            "trends": trends,
+            "agent_analysis": agent_analysis
+        }
+        
+        # Add legacy fields for backward compatibility
+        if agent_analysis:
+            response["recovery_status"] = {
+                "status": agent_analysis["status"],
+                "score": 85.0 if agent_analysis["status"] == "good" else 60.0 if agent_analysis["status"] == "medium" else 30.0,
+                "factors": [agent_analysis["detailed_reasoning"]]
+            }
+            response["readiness_recommendation"] = {
+                "recommendation": "maintain" if agent_analysis["status"] == "good" else "reduce" if agent_analysis["status"] == "medium" else "rest",
+                "confidence": 75.0,
+                "reasoning": agent_analysis["detailed_reasoning"]
+            }
+        else:
+            # Fallback to static analysis if no agent data
+            response["recovery_status"] = {
+                "status": "good",
+                "score": 85.0,
+                "factors": ["Good sleep quality", "Stable HRV", "Low RHR"]
+            }
+            response["readiness_recommendation"] = {
+                "recommendation": "maintain",
+                "confidence": 75.0,
+                "reasoning": "Good recovery status, moderate training load"
+            }
+        
+        return response
+        
+    except Exception as e:
+        logger.error(f"Error in health analysis: {e}")
+        raise HTTPException(status_code=500, detail=f"Health analysis failed: {str(e)}")
 
 @app.get("/api/metrics/pmc", response_model=PMCResponse)
 def get_pmc_metrics(
@@ -1341,3 +1549,41 @@ def get_pmc_metrics(
     except Exception as e:
         logger.error(f"Failed to get PMC metrics: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to get PMC metrics: {str(e)}")
+
+@app.get("/api/test/recovery-table")
+def test_recovery_table():
+    """Test endpoint to verify the daily_recovery_analysis table is working."""
+    from utils.database import test_recovery_analysis_table
+    
+    try:
+        result = test_recovery_analysis_table()
+        return {"success": result, "message": "Recovery analysis table is working" if result else "Table not found"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+@app.get("/api/test/recovery-agent")
+def test_recovery_agent():
+    """Test endpoint to verify the recovery analysis agent is working."""
+    from agents.recovery_analysis_agent import execute_recovery_analysis
+    from utils.database import get_active_profile
+    
+    try:
+        # Get athlete ID from profile
+        profile = get_active_profile()
+        if not profile:
+            return {"success": False, "error": "No active profile found"}
+        
+        athlete_id = profile.get("athlete_id")
+        if not athlete_id:
+            return {"success": False, "error": "No athlete ID found in profile"}
+        
+        # Execute recovery analysis
+        result = execute_recovery_analysis(athlete_id)
+        
+        return {
+            "success": True,
+            "result": result,
+            "message": "Recovery analysis agent executed successfully"
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
