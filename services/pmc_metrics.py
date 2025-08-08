@@ -27,10 +27,13 @@ class PMCMetrics:
         
         Args:
             days: Number of days for the decay period
-            
+
         Returns:
-            Decay factor (typically 0.95 for CTL, 0.86 for ATL)
+            Decay factor (e.g., 0.98 for CTL, 0.87 for ATL)
         """
+        # Example outputs for common PMC periods:
+        # CTL decay factor for 42 days ~0.98
+        # ATL decay factor for 7 days  ~0.87
         return math.exp(-1 / days)
     
     def calculate_ctl(self, workouts: List[Dict], target_date: date) -> float:
