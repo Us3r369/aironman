@@ -136,15 +136,15 @@ def test_map_targets_to_timestamps_run():
     # First two points should have warmup targets
     assert enhanced_trackpoints[0]["target_speed_low"] == 2500
     assert enhanced_trackpoints[0]["target_speed_high"] == 3000
-    assert enhanced_trackpoints[0]["target_pace_high"] == 400.0  # 1000/2.5
-    assert enhanced_trackpoints[0]["target_pace_low"] == 333.33  # 1000/3.0
+    assert enhanced_trackpoints[0]["target_pace_high"] == pytest.approx(400.0, abs=0.01)  # 1000/2.5
+    assert enhanced_trackpoints[0]["target_pace_low"] == pytest.approx(333.33, abs=0.01)  # 1000/3.0
     assert enhanced_trackpoints[0]["workout_intensity"] == "warmup"
     
     # Third point should have active targets
     assert enhanced_trackpoints[2]["target_speed_low"] == 3000
     assert enhanced_trackpoints[2]["target_speed_high"] == 3500
-    assert enhanced_trackpoints[2]["target_pace_high"] == 333.33  # 1000/3.0
-    assert enhanced_trackpoints[2]["target_pace_low"] == 285.71  # 1000/3.5
+    assert enhanced_trackpoints[2]["target_pace_high"] == pytest.approx(333.33, abs=0.01)  # 1000/3.0
+    assert enhanced_trackpoints[2]["target_pace_low"] == pytest.approx(285.71, abs=0.01)  # 1000/3.5
     assert enhanced_trackpoints[2]["workout_intensity"] == "active"
 
 
