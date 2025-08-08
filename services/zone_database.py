@@ -5,7 +5,7 @@ Handles storage and retrieval of workout zone analysis results.
 
 import logging
 from typing import Dict, Any, Optional, List
-from utils.database import execute_query, get_athlete_uuid
+from utils.database import execute_query, get_athlete_uuid, get_db_conn
 import uuid
 
 logger = logging.getLogger(__name__)
@@ -239,3 +239,46 @@ def get_athlete_zone_summary(athlete_id: str, start_date: str = None, end_date: 
             "total_duration_minutes": 0,
             "workout_count": 0
         } 
+def get_athlete_zones(athlete_name: str) -> Dict[str, Any]:
+    """Retrieve heart rate and power zones for an athlete.
+
+    This function looks up the zone configuration for the given athlete name.
+    The return format groups zones into a list of ``{"min": x, "max": y}``.
+    """
+    query = """
+        SELECT
+            lt_heartrate,
+            hr_zone_z1_low, hr_zone_z1_high,
+            hr_zone_z2_low, hr_zone_z2_high,
+            hr_zone_zx_low, hr_zone_zx_high,
+            hr_zone_z3_low, hr_zone_z3_high,
+            hr_zone_zy_low, hr_zone_zy_high,
+            hr_zone_z4_low, hr_zone_z4_high,
+            hr_zone_z5_low, hr_zone_z5_high,
+            bike_ftp_power,
+            bike_power_zone_z1_low, bike_power_zone_z1_high,
+            bike_power_zone_z2_low, bike_power_zone_z2_high,
+            bike_power_zone_zx_low, bike_power_zone_zx_high,
+            bike_power_zone_z3_low, bike_power_zone_z3_high,
+            bike_power_zone_zy_low, bike_power_zone_zy_high,
+            bike_power_zone_z4_low, bike_power_zone_z4_high,
+            bike_power_zone_z5_low, bike_power_zone_z5_high
+        FROM athlete_zone_setting
+        WHERE athlete_id = (SELECT id FROM athlete WHERE name = %s)
+    """
+    with get_db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, (athlete_name,))
+            row = cur.fetchone()
+            if not row:
+                raise Exception("Athlete zones not found")
+    lt_hr = row[0]
+    hr_values = row[1:13]
+    power_ftp = row[13]
+    power_values = row[14:26]
+    def pairs(values):
+        return [{"min": values[i], "max": values[i+1]} for i in range(0, min(len(values),12), 2)]
+    return {
+        "heart_rate": {"lt_hr": lt_hr, "zones": pairs(hr_values)},
+        "power": {"ftp": power_ftp, "zones": pairs(power_values)},
+    }
