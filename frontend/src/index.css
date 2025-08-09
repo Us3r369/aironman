@@ -1,5 +1,24 @@
+/* Global theme variables */
+:root {
+  --color-bg: #f7fafc;
+  --color-text: #0f172a;
+  --sidebar-bg: #0f172a;
+  --sidebar-hover: #164e63;
+  --accent: #06b6d4;
+}
+
 body {
   margin: 0;
   padding: 0;
-  background: #f7fafc;
-} 
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+/* Dark theme overrides */
+body.dark {
+  --color-bg: #0f172a;
+  --color-text: #f1f5f9;
+  --sidebar-bg: #111827;
+  --sidebar-hover: #1e293b;
+  --accent: #0ea5e9;
+}
