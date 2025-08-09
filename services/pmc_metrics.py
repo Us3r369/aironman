@@ -8,7 +8,7 @@ endurance athletes based on their workout TSS data.
 
 import math
 from datetime import datetime, date, timedelta
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Any
 from utils.database import get_db_conn
 from utils.exceptions import DatabaseException
 
@@ -284,3 +284,31 @@ class PMCMetrics:
 
 # Global instance for easy access
 pmc_metrics = PMCMetrics() 
+def calculate_pmc_metrics(workouts: List[Dict]) -> Dict[str, Any]:
+    """Calculate per-workout metrics and overall PMC summary.
+
+    Args:
+        workouts: list of dicts with at least ``timestamp`` and ``tss`` keys.
+
+    Returns:
+        dict with two keys:
+            ``metrics`` – simple echo of input workouts with timestamp and tss
+            ``summary`` – aggregate CTL/ATL/TSB values for today
+    """
+    pmc = PMCMetrics()
+    metrics = []
+    formatted = []
+    for w in workouts:
+        ts = w.get('timestamp')
+        tss = float(w.get('tss', 0))
+        metrics.append({'timestamp': ts, 'tss': tss})
+        if isinstance(ts, datetime):
+            formatted.append({'date': ts.date(), 'tss': tss})
+        elif ts is not None:
+            formatted.append({'date': ts, 'tss': tss})
+    today = date.today()
+    ctl = pmc.calculate_ctl(formatted, today)
+    atl = pmc.calculate_atl(formatted, today)
+    tsb = pmc.calculate_tsb(ctl, atl)
+    summary = {'ctl': round(ctl, 2), 'atl': round(atl, 2), 'tsb': round(tsb, 2)}
+    return {'metrics': metrics, 'summary': summary}

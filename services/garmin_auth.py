@@ -46,3 +46,11 @@ def get_garmin_client() -> Garmin:
         ) as err:
             raise RuntimeError(f"Garmin authentication failed: {err}")
     return garmin
+
+def get_garmin_credentials() -> tuple[str, str]:
+    """Return Garmin account credentials from settings.
+
+    This helper is used by tests to verify that credentials are sourced from the
+    environment or configuration layer.
+    """
+    return settings.GARMIN_EMAIL, settings.GARMIN_PASSWORD
