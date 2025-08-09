@@ -2536,6 +2536,11 @@ function HealthAnalysis() {
 
 function App() {
   const [selectedItem, setSelectedItem] = useState('pmc');
+  const [darkMode, setDarkMode] = useState(false);
+
+  useEffect(() => {
+    document.body.classList.toggle('dark', darkMode);
+  }, [darkMode]);
 
   const renderMainContent = () => {
     switch (selectedItem) {
@@ -2558,6 +2563,14 @@ function App() {
     <div className="app-container">
       <Sidebar selectedItem={selectedItem} onItemSelect={setSelectedItem} />
       <div className="main-content">
+        <div className="top-bar">
+          <button
+            className="theme-toggle"
+            onClick={() => setDarkMode(!darkMode)}
+          >
+            {darkMode ? 'Light Mode' : 'Dark Mode'}
+          </button>
+        </div>
         {renderMainContent()}
       </div>
     </div>

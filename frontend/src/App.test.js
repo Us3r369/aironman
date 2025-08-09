@@ -25,6 +25,16 @@ Object.defineProperty(window, 'location', {
   writable: true,
 });
 
+describe('Theme toggle', () => {
+  test('switches between light and dark modes', () => {
+    render(<App />);
+    const toggle = screen.getByRole('button', { name: /dark mode/i });
+    expect(document.body).not.toHaveClass('dark');
+    fireEvent.click(toggle);
+    expect(document.body).toHaveClass('dark');
+  });
+});
+
 Object.defineProperty(window, 'history', {
   value: {
     replaceState: jest.fn(),
