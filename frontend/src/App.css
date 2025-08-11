@@ -1013,6 +1013,37 @@ body.modal-open {
   color: #555;
   margin-right: 8px;
 }
+.workout-item.planned {
+  background: #fff4e6;
+  cursor: default;
+}
+.planned-label {
+  font-size: 0.8em;
+  color: #e67e22;
+  margin-left: 4px;
+}
+.workout-desc {
+  font-size: 0.9em;
+  color: #555;
+}
+
+.training-plan-container {
+  padding: 20px;
+}
+.training-plan-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 300px;
+}
+.training-plan-form label {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.9em;
+}
+.plan-message {
+  margin-top: 10px;
+}
 .no-workout {
   color: #bbb;
 }

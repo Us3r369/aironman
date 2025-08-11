@@ -90,3 +90,28 @@ Stores time-series or summary data for each workout.
 | `value` | Float | The value of the metric. |
 | `unit` | String | The unit of measurement. |
 | `timestamp` | DateTime | Timestamp for time-series data; null for summary. | 
+#### 7. **`training_plan`**
+Stores high level information about a generated plan.
+
+| Column | Data Type | Description |
+| :--- | :--- | :--- |
+| `id` | UUID (PK) | Unique identifier for the plan. |
+| `athlete_id` | UUID (FK) | References `athlete.id`. |
+| `race_date` | Date | Target race date. |
+| `race_type` | Text | Type of event (e.g., marathon, ironman). |
+| `max_workouts_per_week` | Integer | Maximum sessions per week. |
+| `created_at` | Timestamp | Creation time. |
+
+#### 8. **`training_session`**
+Individual sessions belonging to a training plan.
+
+| Column | Data Type | Description |
+| :--- | :--- | :--- |
+| `id` | UUID (PK) | Unique identifier for the session. |
+| `plan_id` | UUID (FK) | References `training_plan.id`. |
+| `athlete_id` | UUID (FK) | References `athlete.id`. |
+| `session_date` | Date | Scheduled date of the session. |
+| `workout_type` | Text | Workout modality/type. |
+| `description` | Text | Human readable session description. |
+| `phase` | Text | Macro phase (base, build, peak, taper). |
+| `planned_tss` | Float | Optional planned TSS. |
