@@ -32,6 +32,12 @@ function Sidebar({ selectedItem, onItemSelect }) {
           Workouts
         </li>
         <li
+          className={`sidebar-item ${selectedItem === 'plan' ? 'active' : ''}`}
+          onClick={() => onItemSelect('plan')}
+        >
+          Training Plan
+        </li>
+        <li
           className={`sidebar-item ${selectedItem === 'health' ? 'active' : ''}`}
           onClick={() => onItemSelect('health')}
         >
@@ -755,8 +761,16 @@ function WorkoutsView() {
                       ) : (
                         <ul className="workout-list">
                           {dayWorkouts.map(w => (
-                            <li key={w.id} className="workout-item" onClick={() => handleWorkoutSelect(w.id)}>
+                            <li
+                              key={w.id}
+                              className={`workout-item ${w.planned ? 'planned' : ''}`}
+                              onClick={w.planned ? undefined : () => handleWorkoutSelect(w.id)}
+                            >
                               <span className="workout-type">{w.workout_type}</span>
+                              {w.planned && <span className="planned-label">planned</span>}
+                              {w.description && (
+                                <span className="workout-desc">{w.description}</span>
+                              )}
                               {w.tss !== null && <span className="workout-tss">TSS: {w.tss}</span>}
                             </li>
                           ))}
@@ -855,6 +869,66 @@ function WorkoutsView() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function TrainingPlanDesigner() {
+  const [raceDate, setRaceDate] = useState("");
+  const [raceType, setRaceType] = useState("marathon");
+  const [workoutsPerWeek, setWorkoutsPerWeek] = useState(4);
+  const [message, setMessage] = useState("");
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setMessage("");
+    try {
+      const profileRes = await fetch("http://localhost:8000/api/profile");
+      if (!profileRes.ok) throw new Error("Failed to load profile");
+      const profile = await profileRes.json();
+
+      const res = await fetch("http://localhost:8000/api/training-plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          athlete_id: profile.athlete_id,
+          race_date: raceDate,
+          race_type: raceType,
+          max_workouts_per_week: Number(workoutsPerWeek)
+        })
+      });
+      if (res.ok) {
+        setMessage("Training plan created.");
+      } else {
+        setMessage("Failed to create plan.");
+      }
+    } catch (err) {
+      setMessage("Error: " + err.message);
+    }
+  };
+
+  return (
+    <div className="training-plan-container">
+      <h2>Training Plan Designer</h2>
+      <form onSubmit={handleSubmit} className="training-plan-form">
+        <label>
+          Race Date:
+          <input type="date" value={raceDate} onChange={e => setRaceDate(e.target.value)} required />
+        </label>
+        <label>
+          Race Type:
+          <select value={raceType} onChange={e => setRaceType(e.target.value)}>
+            <option value="marathon">Running Marathon</option>
+            <option value="ironman">Triathlon Ironman</option>
+          </select>
+        </label>
+        <label>
+          Workouts per Week:
+          <input type="number" min="1" max="14" value={workoutsPerWeek} onChange={e => setWorkoutsPerWeek(e.target.value)} />
+        </label>
+        <button type="submit">Generate Plan</button>
+      </form>
+      {message && <div className="plan-message">{message}</div>}
     </div>
   );
 }
@@ -2552,6 +2626,8 @@ function App() {
         return <ViewProfile />;
       case 'workouts':
         return <WorkoutsView />;
+      case 'plan':
+        return <TrainingPlanDesigner />;
       case 'health':
         return <HealthAnalysis />;
       default:
