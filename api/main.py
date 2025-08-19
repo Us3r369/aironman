@@ -22,6 +22,7 @@ from utils.exceptions import (
 )
 from utils.database import get_db_conn, get_athlete_uuid
 from services.pmc_metrics import pmc_metrics
+from agents.training_plan_agent import TrainingPlanAgent
 
 # Setup logging
 setup_logging(log_level="INFO", log_file="logs/app.log")
@@ -500,12 +501,36 @@ class WorkoutSummary(BaseModel):
     tss: Optional[float] = None
     duration_sec: Optional[int] = None
     duration_hr: Optional[float] = None
-    # Add more fields as needed for the frontend
+    description: Optional[str] = None
+    planned: bool = False
 
 class WorkoutDetail(WorkoutSummary):
     json_file: Optional[dict] = None
     csv_file: Optional[str] = None
     synced_at: Optional[str] = None
+
+
+class TrainingPlanInput(BaseModel):
+    athlete_id: str
+    race_date: str
+    race_type: str
+    max_workouts_per_week: int
+
+
+class TrainingSessionOut(BaseModel):
+    id: str
+    date: str
+    workout_type: str
+    description: Optional[str] = None
+    phase: Optional[str] = None
+
+
+class TrainingPlanOut(BaseModel):
+    plan_id: str
+    race_date: str
+    race_type: str
+    max_workouts_per_week: int
+    sessions: List[TrainingSessionOut]
 
 @app.get("/api/workouts", response_model=List[WorkoutSummary])
 def get_workouts(
@@ -538,17 +563,145 @@ def get_workouts(
                 """,
                 (athlete_uuid, start_date, end_date)
             )
-            rows = cur.fetchall()
+            workout_rows = cur.fetchall()
+
+            cur.execute(
+                """
+                SELECT id, athlete_id, session_date, workout_type, planned_tss, description
+                FROM training_session
+                WHERE athlete_id = %s AND session_date BETWEEN %s AND %s
+                ORDER BY session_date ASC
+                """,
+                (athlete_uuid, start_date, end_date)
+            )
+            session_rows = cur.fetchall()
+
             result = []
-            for row in rows:
+            for row in workout_rows:
                 result.append(WorkoutSummary(
                     id=row[0],
                     athlete_id=row[1],
                     timestamp=row[2].isoformat() if hasattr(row[2], 'isoformat') else str(row[2]),
                     workout_type=row[3],
                     tss=row[4],
+                    planned=False
                 ))
+            for row in session_rows:
+                result.append(WorkoutSummary(
+                    id=row[0],
+                    athlete_id=row[1],
+                    timestamp=row[2].isoformat() if hasattr(row[2], 'isoformat') else str(row[2]),
+                    workout_type=row[3],
+                    tss=row[4],
+                    description=row[5],
+                    planned=True
+                ))
+
+            result.sort(key=lambda w: w.timestamp)
             return result
+
+@app.post("/api/training-plan", response_model=TrainingPlanOut)
+def create_training_plan(plan: TrainingPlanInput):
+    """Generate a training plan and persist sessions."""
+    try:
+        athlete_uuid = get_athlete_uuid(plan.athlete_id)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Athlete not found: {e}")
+    
+    start_date = dt.date.today()
+    race_date = dt.date.fromisoformat(plan.race_date)
+    agent = TrainingPlanAgent()
+    sessions = agent.generate_plan(start_date, race_date, plan.max_workouts_per_week)
+
+    with get_db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO training_plan (athlete_id, race_date, race_type, max_workouts_per_week)
+                VALUES (%s, %s, %s, %s) RETURNING id
+                """,
+                (athlete_uuid, plan.race_date, plan.race_type, plan.max_workouts_per_week)
+            )
+            plan_id = cur.fetchone()[0]
+            session_out: List[TrainingSessionOut] = []
+            for s in sessions:
+                cur.execute(
+                    """
+                    INSERT INTO training_session (plan_id, athlete_id, session_date, workout_type, description, phase)
+                    VALUES (%s, %s, %s, %s, %s, %s) RETURNING id
+                    """,
+                    (plan_id, athlete_uuid, s["date"], s["workout_type"], s["description"], s["phase"])
+                )
+                sid = cur.fetchone()[0]
+                session_out.append(TrainingSessionOut(
+                    id=sid,
+                    date=s["date"].isoformat(),
+                    workout_type=s["workout_type"],
+                    description=s["description"],
+                    phase=s["phase"]
+                ))
+            conn.commit()
+
+    return TrainingPlanOut(
+        plan_id=plan_id,
+        race_date=plan.race_date,
+        race_type=plan.race_type,
+        max_workouts_per_week=plan.max_workouts_per_week,
+        sessions=session_out
+    )
+
+
+@app.get("/api/training-plan", response_model=TrainingPlanOut)
+def get_training_plan(athlete_id: str):
+    """Return latest training plan for an athlete."""
+    try:
+        athlete_uuid = get_athlete_uuid(athlete_id)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Athlete not found: {e}")
+    
+    with get_db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, race_date, race_type, max_workouts_per_week
+                FROM training_plan
+                WHERE athlete_id = %s
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (athlete_uuid,)
+            )
+            plan_row = cur.fetchone()
+            if not plan_row:
+                raise HTTPException(status_code=404, detail="Training plan not found")
+            plan_id = plan_row[0]
+            cur.execute(
+                """
+                SELECT id, session_date, workout_type, description, phase
+                FROM training_session
+                WHERE plan_id = %s
+                ORDER BY session_date ASC
+                """,
+                (plan_id,)
+            )
+            sessions = [
+                TrainingSessionOut(
+                    id=r[0],
+                    date=r[1].isoformat() if hasattr(r[1], 'isoformat') else str(r[1]),
+                    workout_type=r[2],
+                    description=r[3],
+                    phase=r[4]
+                )
+                for r in cur.fetchall()
+            ]
+
+    return TrainingPlanOut(
+        plan_id=plan_id,
+        race_date=plan_row[1].isoformat() if hasattr(plan_row[1], 'isoformat') else str(plan_row[1]),
+        race_type=plan_row[2],
+        max_workouts_per_week=plan_row[3],
+        sessions=sessions
+    )
 
 @app.get("/api/workouts/{workout_id}", response_model=WorkoutDetail)
 def get_workout_detail(workout_id: str):
