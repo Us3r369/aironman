@@ -603,6 +603,11 @@ def get_workouts(
 @app.post("/api/training-plan", response_model=TrainingPlanOut)
 def create_training_plan(plan: TrainingPlanInput):
     """Generate a training plan and persist sessions."""
+    try:
+        athlete_uuid = get_athlete_uuid(plan.athlete_id)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Athlete not found: {e}")
+    
     start_date = dt.date.today()
     race_date = dt.date.fromisoformat(plan.race_date)
     agent = TrainingPlanAgent()
@@ -615,7 +620,7 @@ def create_training_plan(plan: TrainingPlanInput):
                 INSERT INTO training_plan (athlete_id, race_date, race_type, max_workouts_per_week)
                 VALUES (%s, %s, %s, %s) RETURNING id
                 """,
-                (plan.athlete_id, plan.race_date, plan.race_type, plan.max_workouts_per_week)
+                (athlete_uuid, plan.race_date, plan.race_type, plan.max_workouts_per_week)
             )
             plan_id = cur.fetchone()[0]
             session_out: List[TrainingSessionOut] = []
@@ -625,7 +630,7 @@ def create_training_plan(plan: TrainingPlanInput):
                     INSERT INTO training_session (plan_id, athlete_id, session_date, workout_type, description, phase)
                     VALUES (%s, %s, %s, %s, %s, %s) RETURNING id
                     """,
-                    (plan_id, plan.athlete_id, s["date"], s["workout_type"], s["description"], s["phase"])
+                    (plan_id, athlete_uuid, s["date"], s["workout_type"], s["description"], s["phase"])
                 )
                 sid = cur.fetchone()[0]
                 session_out.append(TrainingSessionOut(
@@ -649,6 +654,11 @@ def create_training_plan(plan: TrainingPlanInput):
 @app.get("/api/training-plan", response_model=TrainingPlanOut)
 def get_training_plan(athlete_id: str):
     """Return latest training plan for an athlete."""
+    try:
+        athlete_uuid = get_athlete_uuid(athlete_id)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Athlete not found: {e}")
+    
     with get_db_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -659,7 +669,7 @@ def get_training_plan(athlete_id: str):
                 ORDER BY created_at DESC
                 LIMIT 1
                 """,
-                (athlete_id,)
+                (athlete_uuid,)
             )
             plan_row = cur.fetchone()
             if not plan_row:
