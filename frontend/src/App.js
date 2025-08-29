@@ -1325,7 +1325,14 @@ function PMCChart({ pmcData, workoutsData, timeframe, setTimeframe }) {
     dailyTss: true
   });
 
+
+  // Debug logging
+  console.log('PMCChart received data:', { pmcData, workoutsData, timeframe });
+  console.log('PMC data length:', pmcData?.length);
+  console.log('Sample PMC data:', pmcData?.[0]);
+
   if (!pmcData || pmcData.length === 0) {
+    console.log('No PMC data available');
     return (
       <div className="pmc-chart-container">
         <div className="no-data">No PMC data available</div>
@@ -1333,6 +1340,55 @@ function PMCChart({ pmcData, workoutsData, timeframe, setTimeframe }) {
     );
   }
 
+  // Parse dates and calculate ranges first
+  const dates = pmcData.map(d => {
+    const parsedDate = new Date(d.date);
+    return parsedDate;
+  }).filter(date => !isNaN(date)); // Filter out invalid dates
+  
+  if (dates.length === 0) {
+    console.error('No valid dates found in PMC data');
+    return (
+      <div className="pmc-chart-container">
+        <div className="no-data">No valid dates in PMC data</div>
+      </div>
+    );
+  }
+  
+  // Use only PMC date range for chart bounds
+  const minDate = new Date(Math.min(...dates));
+  const maxDate = new Date(Math.max(...dates));
+  
+  console.log('PMC Date range:', { 
+    pmcDates: dates.length, 
+    minDate, 
+    maxDate 
+  });
+  
+  // Filter workouts to only include those within the PMC date range
+  const filteredWorkouts = workoutsData ? workoutsData.filter(w => {
+    if (w.tss === null) return false;
+    
+    const workoutDate = new Date(w.timestamp.split('T')[0]);
+    const isInRange = workoutDate >= minDate && workoutDate <= maxDate;
+    
+    console.log(`Filtering workout: date=${w.timestamp.split('T')[0]}, tss=${w.tss}, inRange=${isInRange}`);
+    
+    return isInRange;
+  }) : [];
+
+  // Calculate ranges for selected metrics
+  const ctlValues = pmcData.map(d => d.ctl);
+  const atlValues = pmcData.map(d => d.atl);
+  const tsbValues = pmcData.map(d => d.tsb);
+  const workoutTssValues = filteredWorkouts.map(w => w.tss).filter(tss => tss !== null);
+  
+  console.log('Filtered workouts:', {
+    totalWorkouts: workoutsData?.length || 0,
+    filteredWorkouts: filteredWorkouts.length,
+    workoutTssValues: workoutTssValues.length
+  });
+  
   // Dynamic axis calculation based on selected metrics
   const needsTssAxis = selectedMetrics.ctl || selectedMetrics.atl || selectedMetrics.dailyTss;
   const needsTsbAxis = selectedMetrics.tsb;
@@ -1340,9 +1396,9 @@ function PMCChart({ pmcData, workoutsData, timeframe, setTimeframe }) {
   // Dynamic padding based on axes needed
   const padding = {
     top: 50,
-    right: needsTsbAxis ? 100 : 40,
-    bottom: 80,
-    left: needsTssAxis ? 80 : 40
+    right: needsTsbAxis ? 120 : 60, // Increased right padding
+    bottom: 100, // Increased bottom padding for X-axis labels
+    left: needsTssAxis ? 100 : 60   // Increased left padding
   };
   
   const width = 900;
@@ -1350,16 +1406,9 @@ function PMCChart({ pmcData, workoutsData, timeframe, setTimeframe }) {
   const chartWidth = width - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
 
-  // Parse dates and calculate ranges
-  const dates = pmcData.map(d => new Date(d.date));
-  const minDate = new Date(Math.min(...dates));
-  const maxDate = new Date(Math.max(...dates));
-  
-  // Calculate ranges for selected metrics
-  const ctlValues = pmcData.map(d => d.ctl);
-  const atlValues = pmcData.map(d => d.atl);
-  const tsbValues = pmcData.map(d => d.tsb);
-  const workoutTssValues = workoutsData ? workoutsData.map(w => w.tss) : [];
+  // Debug logging for values
+  console.log('Calculated values:', { ctlValues, atlValues, tsbValues, workoutTssValues });
+  console.log('Chart dimensions:', { width, height, chartWidth, chartHeight, padding });
   
   // Dynamic TSS range calculation
   const getTssRange = () => {
@@ -1367,17 +1416,39 @@ function PMCChart({ pmcData, workoutsData, timeframe, setTimeframe }) {
     if (selectedMetrics.ctl) values.push(...ctlValues);
     if (selectedMetrics.atl) values.push(...atlValues);
     if (selectedMetrics.dailyTss) values.push(...workoutTssValues);
-    return Math.max(...values, 100); // Ensure minimum range
+    const max = Math.max(...values, 100); // Ensure minimum range
+    console.log(`TSS range calculation: values=${values}, max=${max}`);
+    return max;
   };
   
   const maxTSS = getTssRange();
   const minTSB = Math.min(...tsbValues, -20);
   const maxTSB = Math.max(...tsbValues, 20);
 
+  console.log('Chart ranges:', { maxTSS, minTSB, maxTSB });
+  console.log('Selected metrics:', selectedMetrics);
+
   // Scale functions
-  const scaleX = x => padding.left + ((x - minDate) / (maxDate - minDate)) * chartWidth;
-  const scaleYTSS = y => padding.top + (1 - (y / maxTSS)) * chartHeight;
-  const scaleYTSB = y => padding.top + (1 - ((y - minTSB) / (maxTSB - minTSB))) * chartHeight;
+  const scaleX = x => {
+    // Ensure x is a Date object
+    const dateObj = x instanceof Date ? x : new Date(x);
+    
+    // Check if the date is valid
+    if (isNaN(dateObj.getTime())) {
+      console.error(`Invalid date in scaleX: ${x}`);
+      return padding.left;
+    }
+    
+    return padding.left + ((dateObj - minDate) / (maxDate - minDate)) * chartWidth;
+  };
+  
+  const scaleYTSS = y => {
+    return padding.top + (1 - (y / maxTSS)) * chartHeight;
+  };
+  
+  const scaleYTSB = y => {
+    return padding.top + (1 - ((y - minTSB) / (maxTSB - minTSB))) * chartHeight;
+  };
 
   // Format date for display
   const formatDate = (date) => {
@@ -1403,12 +1474,32 @@ function PMCChart({ pmcData, workoutsData, timeframe, setTimeframe }) {
   const tsbPath = selectedMetrics.tsb ? createPath(pmcData, scaleYTSB, 'tsb') : '';
 
   // Create workout scatter points (only if selected)
-  const workoutPoints = (selectedMetrics.dailyTss && workoutsData) ? workoutsData.map(w => ({
-    x: scaleX(new Date(w.date)),
-    y: scaleYTSS(w.tss),
-    tss: w.tss,
-    date: w.date
-  })) : [];
+  const workoutPoints = (selectedMetrics.dailyTss && filteredWorkouts.length > 0) ? filteredWorkouts
+    .map(w => {
+      // Extract date from timestamp (already filtered to be within PMC range)
+      const workoutDate = w.timestamp.split('T')[0];
+      const workoutDateObj = new Date(workoutDate);
+      
+      const x = scaleX(workoutDateObj);
+      const y = scaleYTSS(w.tss);
+      
+      // Validate that coordinates are within chart bounds
+      const isValidX = x >= padding.left && x <= (width - padding.right);
+      const isValidY = y >= padding.top && y <= (height - padding.bottom);
+      
+      if (isValidX && isValidY) {
+        return {
+          x: x,
+          y: y,
+          tss: w.tss,
+          date: workoutDate
+        };
+      } else {
+        console.warn(`Workout point outside chart bounds: x=${x}, y=${y}`);
+        return null;
+      }
+    })
+    .filter(point => point !== null) : [];
 
   // Generate Y-axis labels with proper intervals
   const tssLabels = [0, 20, 40, 60, 80, 100, 120, 140, 150, 200, 250, 300];
@@ -1460,61 +1551,7 @@ function PMCChart({ pmcData, workoutsData, timeframe, setTimeframe }) {
 
   return (
     <div className="pmc-chart-container">
-      <h3>Performance Management - All Workout Types</h3>
-      
-      {/* Interactive Controls */}
-      <div className="pmc-controls">
-        <div className="metric-selector">
-          <h4>Select Metrics:</h4>
-          <div className="metric-buttons">
-            <button
-              className={`metric-btn ${selectedMetrics.ctl ? 'active' : ''}`}
-              onClick={() => handleMetricToggle('ctl')}
-            >
-              <span className="metric-color" style={{backgroundColor: '#374151'}}></span>
-              CTL (Fitness)
-            </button>
-            <button
-              className={`metric-btn ${selectedMetrics.atl ? 'active' : ''}`}
-              onClick={() => handleMetricToggle('atl')}
-            >
-              <span className="metric-color" style={{backgroundColor: '#f97316'}}></span>
-              ATL (Fatigue)
-            </button>
-            <button
-              className={`metric-btn ${selectedMetrics.tsb ? 'active' : ''}`}
-              onClick={() => handleMetricToggle('tsb')}
-            >
-              <span className="metric-color" style={{backgroundColor: '#ec4899'}}></span>
-              TSB (Form)
-            </button>
-            <button
-              className={`metric-btn ${selectedMetrics.dailyTss ? 'active' : ''}`}
-              onClick={() => handleMetricToggle('dailyTss')}
-            >
-              <span className="metric-color" style={{backgroundColor: '#3b82f6'}}></span>
-              Daily TSS
-            </button>
-          </div>
-        </div>
-        
-        <div className="timeframe-selector">
-          <h4>Timeframe: {timeframe} days</h4>
-          <div className="timeframe-buttons">
-            {[7, 14, 30, 60, 90].map(days => (
-              <button
-                key={days}
-                className={`timeframe-btn ${timeframe === days ? 'active' : ''}`}
-                onClick={() => setTimeframe(days)}
-              >
-                {days} days
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-      
-      <div className="pmc-chart-wrapper" 
+      <div className="pmc-chart-area" 
            onMouseMove={handleMouseMove} 
            onMouseLeave={handleMouseLeave}>
         <svg width={width} height={height} style={{ background: 'white', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
@@ -1590,6 +1627,7 @@ function PMCChart({ pmcData, workoutsData, timeframe, setTimeframe }) {
                 fill="none"
                 stroke="#374151"
                 strokeWidth="3"
+                style={{ filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.1))' }}
               />
             </>
           )}
@@ -1601,6 +1639,7 @@ function PMCChart({ pmcData, workoutsData, timeframe, setTimeframe }) {
               fill="none"
               stroke="#f97316"
               strokeWidth="2"
+              style={{ filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.1))' }}
             />
           )}
 
@@ -1611,6 +1650,7 @@ function PMCChart({ pmcData, workoutsData, timeframe, setTimeframe }) {
               fill="none"
               stroke="#ec4899"
               strokeWidth="2"
+              style={{ filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.1))' }}
             />
           )}
 
@@ -1636,20 +1676,42 @@ function PMCChart({ pmcData, workoutsData, timeframe, setTimeframe }) {
             strokeWidth="2"
           />
 
-          {/* X-axis labels - one per day */}
+          {/* X-axis labels - smart date labeling based on timeframe */}
           {pmcData.map((d, i) => {
             const x = scaleX(new Date(d.date));
+            const date = new Date(d.date);
+            
+            // Smart date labeling based on timeframe
+            let showLabel = false;
+            let labelText = '';
+            
+            if (timeframe <= 7) {
+              // Show all dates for 7 days or less
+              showLabel = true;
+              labelText = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            } else if (timeframe <= 30) {
+              // Show every 2-3 days for 30 days or less
+              showLabel = i % 2 === 0;
+              labelText = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            } else {
+              // Show weekly labels for longer timeframes
+              showLabel = date.getDay() === 0; // Sunday
+              labelText = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            }
+            
+            if (!showLabel) return null;
+            
             return (
               <text
                 key={`x-label-${i}`}
                 x={x}
                 y={height - padding.bottom + 25}
                 textAnchor="middle"
-                fontSize="10"
+                fontSize="11"
                 fill="#64748b"
                 transform={`rotate(-45, ${x}, ${height - padding.bottom + 25})`}
               >
-                {formatDate(new Date(d.date))}
+                {labelText}
               </text>
             );
           })}
@@ -1707,20 +1769,20 @@ function PMCChart({ pmcData, workoutsData, timeframe, setTimeframe }) {
 
           {/* Y-axis title */}
           <text
-            x={padding.left - 40}
+            x={padding.left - 50}
             y={height / 2}
             textAnchor="middle"
             dominantBaseline="middle"
             fontSize="14"
             fontWeight="600"
             fill="#374151"
-            transform={`rotate(-90, ${padding.left - 40}, ${height / 2})`}
+            transform={`rotate(-90, ${padding.left - 50}, ${height / 2})`}
           >
             TSS/d
           </text>
 
           {/* Right Y-axis (TSB) - only if needed */}
-          {needsTsbAxis && (
+          {selectedMetrics.tsb && (
             <>
               <line
                 x1={width - padding.right}
@@ -1807,112 +1869,62 @@ function PMCChart({ pmcData, workoutsData, timeframe, setTimeframe }) {
             />
           )}
         </svg>
-
-        {/* Hover tooltip */}
-        {hoverData && (
-          <div 
-            className="pmc-tooltip"
-            style={{
-              position: 'absolute',
-              left: hoverPosition.x - 200, // Align tooltip's right edge with chart's right edge
-              top: hoverPosition.y,
-              transform: 'none',
-              pointerEvents: 'none',
-              zIndex: 1000
-            }}
-          >
-            <div className="tooltip-header">
-              {formatDate(new Date(hoverData.date))}
-            </div>
-            <div className="tooltip-content">
-              {selectedMetrics.ctl && (
-                <div className="tooltip-row">
-                  <span className="tooltip-label">Fitness (CTL):</span>
-                  <span className="tooltip-value">{Math.round(hoverData.ctl)}</span>
-                </div>
-              )}
-              {selectedMetrics.atl && (
-                <div className="tooltip-row">
-                  <span className="tooltip-label">Fatigue (ATL):</span>
-                  <span className="tooltip-value">{Math.round(hoverData.atl)}</span>
-                </div>
-              )}
-              {selectedMetrics.tsb && (
-                <div className="tooltip-row">
-                  <span className="tooltip-label">Form (TSB):</span>
-                  <span className={`tooltip-value ${hoverData.tsb > 0 ? 'positive' : 'negative'}`}>
-                    {Math.round(hoverData.tsb)}
-                  </span>
-                </div>
-              )}
-              {selectedMetrics.dailyTss && (
-                <div className="tooltip-row">
-                  <span className="tooltip-label">Daily TSS:</span>
-                  <span className="tooltip-value">
-                    {workoutsData?.find(w => w.date === hoverData.date)?.tss || 'N/A'}
-                  </span>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
       </div>
       
-      {/* Tabular Data View for Debugging */}
-      <PMCDataTable 
-        pmcData={pmcData} 
-        workoutsData={workoutsData} 
-        selectedMetrics={selectedMetrics}
-      />
+      {/* Hover tooltip */}
+      {hoverData && (
+        <div 
+          className="pmc-tooltip"
+          style={{
+            position: 'absolute',
+            left: hoverPosition.x - 200, // Align tooltip's right edge with chart's right edge
+            top: hoverPosition.y,
+            transform: 'none',
+            pointerEvents: 'none',
+            zIndex: 1000
+          }}
+        >
+          <div className="tooltip-header">
+            {formatDate(new Date(hoverData.date))}
+          </div>
+          <div className="tooltip-content">
+            {selectedMetrics.ctl && (
+              <div className="tooltip-row">
+                <span className="tooltip-label">Fitness (CTL):</span>
+                <span className="tooltip-value">{Math.round(hoverData.ctl)}</span>
+              </div>
+            )}
+            {selectedMetrics.atl && (
+              <div className="tooltip-row">
+                <span className="tooltip-label">Fatigue (ATL):</span>
+                <span className="tooltip-value">{Math.round(hoverData.atl)}</span>
+              </div>
+            )}
+            {selectedMetrics.tsb && (
+              <div className="tooltip-row">
+                <span className="tooltip-label">Form (TSB):</span>
+                <span className={`tooltip-value ${hoverData.tsb > 0 ? 'positive' : 'negative'}`}>
+                  {Math.round(hoverData.tsb)}
+                </span>
+              </div>
+            )}
+            {selectedMetrics.dailyTss && (
+              <div className="tooltip-row">
+                <span className="tooltip-label">Daily TSS:</span>
+                <span className="tooltip-value">
+                  {workoutsData?.find(w => w.date === hoverData.date)?.tss || 'N/A'}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 // PMC Data Table Component
-function PMCDataTable({ pmcData, workoutsData, selectedMetrics }) {
-  if (!pmcData || pmcData.length === 0) {
-    return null;
-  }
 
-  return (
-    <div className="pmc-data-table">
-      <h4>Data Table (Debug View)</h4>
-      <div className="table-container">
-        <table>
-          <thead>
-            <tr>
-              <th>Date</th>
-              {selectedMetrics.ctl && <th>CTL</th>}
-              {selectedMetrics.atl && <th>ATL</th>}
-              {selectedMetrics.tsb && <th>TSB</th>}
-              {selectedMetrics.dailyTss && <th>Daily TSS</th>}
-            </tr>
-          </thead>
-          <tbody>
-            {pmcData.map((data, index) => {
-              const workout = workoutsData?.find(w => w.date === data.date);
-              return (
-                <tr key={index}>
-                  <td>{new Date(data.date).toLocaleDateString()}</td>
-                  {selectedMetrics.ctl && <td>{Math.round(data.ctl)}</td>}
-                  {selectedMetrics.atl && <td>{Math.round(data.atl)}</td>}
-                  {selectedMetrics.tsb && (
-                    <td className={data.tsb > 0 ? 'positive' : 'negative'}>
-                      {Math.round(data.tsb)}
-                    </td>
-                  )}
-                  {selectedMetrics.dailyTss && (
-                    <td>{workout ? Math.round(workout.tss) : 'N/A'}</td>
-                  )}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
 
 // Health trend line plot component
 function HealthTrendPlot({ data, title, color = "#06b6d4", unit = "" }) {
@@ -2271,28 +2283,37 @@ function PMCDashboard() {
     setLoading(true);
     setError(null);
     
-    const month = getMonthDates(monthOffset);
-    const start = month.dates[0].toISOString().slice(0, 10);
-    const end = month.dates[month.dates.length - 1].toISOString().slice(0, 10);
+    // Use timeframe instead of month-based calculation
+    const end = new Date();
+    const start = new Date();
+    start.setDate(end.getDate() - timeframe);
+    
+    const startStr = start.toISOString().slice(0, 10);
+    const endStr = end.toISOString().slice(0, 10);
+    
+    console.log('Fetching PMC data for:', { athleteId, start: startStr, end: endStr, timeframe });
     
     Promise.all([
-      fetch(`http://localhost:8000/api/metrics/pmc?athlete_id=${athleteId}&start_date=${start}&end_date=${end}`),
-      fetch(`http://localhost:8000/api/workouts?athlete_id=${athleteId}&start_date=${start}&end_date=${end}`)
+      fetch(`http://localhost:8000/api/metrics/pmc?athlete_id=${athleteId}&timeframe=${timeframe}`),
+      fetch(`http://localhost:8000/api/workouts?athlete_id=${athleteId}&start_date=${startStr}&end_date=${endStr}`)
     ])
       .then(responses => Promise.all(responses.map(res => {
         if (!res.ok) throw new Error('Failed to fetch data');
         return res.json();
       })))
       .then(([pmcResponse, workoutsResponse]) => {
+        console.log('PMC API response:', pmcResponse);
+        console.log('Workouts API response:', workoutsResponse);
         setPmcData(pmcResponse);
         setWorkoutsData(workoutsResponse || []);
         setLoading(false);
       })
       .catch(err => {
+        console.error('Error fetching PMC data:', err);
         setError(err.message);
         setLoading(false);
       });
-  }, [athleteId, monthOffset]);
+  }, [athleteId, timeframe]); // Changed dependency from monthOffset to timeframe
 
   const goToPreviousMonth = () => setMonthOffset(prev => prev - 1);
   const goToNextMonth = () => setMonthOffset(prev => prev + 1);
@@ -2330,69 +2351,90 @@ function PMCDashboard() {
   return (
     <div className="pmc-container">
       <div className="pmc-header">
-        <div className="pmc-header-content">
-          <button
-            className="week-nav-btn"
-            onClick={goToPreviousMonth}
-            title="Previous Month"
-          >
-            ←
-          </button>
-          <div>
-            <h2>Performance Management Chart</h2>
-            <p>Your training load and readiness {formatMonthDisplay()} (Timeframe: {timeframe} days)</p>
-          </div>
-          <button
-            className="week-nav-btn"
-            onClick={goToNextMonth}
-            title="Next Month"
-          >
-            →
-          </button>
-          {monthOffset !== 0 && (
-            <button
-              className="current-week-btn"
-              onClick={goToCurrentMonth}
-              title="Go to Current Month"
-            >
-              Today
-            </button>
-          )}
-        </div>
+        <h2>Performance Management Chart</h2>
+        <p>Your training load and readiness (Timeframe: {timeframe} days)</p>
+        {pmcData?.metadata?.last_updated && (
+          <p className="data-timestamp">
+            Data last updated: {new Date(pmcData.metadata.last_updated).toLocaleString()}
+          </p>
+        )}
       </div>
 
-      <div className="pmc-content">
-        <div className="pmc-summary">
+      <div className="pmc-summary">
+        <div className="pmc-summary-header">
+          <h3>Today's Current Values</h3>
+          <p className="summary-subtitle">Your current training status as of today</p>
+        </div>
+        <div className="pmc-summary-cards">
           <div className="pmc-summary-card">
-            <h3>CTL (Fitness)</h3>
+            <h4>CTL (Fitness)</h4>
             <div className="pmc-value">{pmcData.summary.ctl}</div>
             <p>Chronic Training Load</p>
           </div>
           <div className="pmc-summary-card">
-            <h3>ATL (Fatigue)</h3>
+            <h4>ATL (Fatigue)</h4>
             <div className="pmc-value">{pmcData.summary.atl}</div>
             <p>Acute Training Load</p>
           </div>
           <div className="pmc-summary-card">
-            <h3>TSB (Readiness)</h3>
+            <h4>TSB (Readiness)</h4>
             <div className={`pmc-value ${pmcData.summary.tsb > 0 ? 'positive' : 'negative'}`}>
               {pmcData.summary.tsb}
             </div>
             <p>Training Stress Balance</p>
           </div>
         </div>
+      </div>
 
-
-
-        <div className="pmc-chart-wrapper">
-          <PMCChart 
-            pmcData={pmcData.metrics} 
-            workoutsData={workoutsData} 
-            timeframe={timeframe} 
-            setTimeframe={setTimeframe}
-          />
+      <div className="pmc-controls">
+        <div className="metrics-selection">
+          <span className="metric-label">Metrics:</span>
+          <button className="metric-btn active">CTL</button>
+          <button className="metric-btn active">ATL</button>
+          <button className="metric-btn active">TSB</button>
+        </div>
+        
+        <div className="timeframe-selection">
+          <span className="timeframe-label">Timeframe:</span>
+          <button 
+            className={`timeframe-btn ${timeframe === 7 ? 'active' : ''}`} 
+            onClick={() => setTimeframe(7)}
+          >
+            7 days
+          </button>
+          <button 
+            className={`timeframe-btn ${timeframe === 14 ? 'active' : ''}`} 
+            onClick={() => setTimeframe(14)}
+          >
+            14 days
+          </button>
+          <button 
+            className={`timeframe-btn ${timeframe === 30 ? 'active' : ''}`} 
+            onClick={() => setTimeframe(30)}
+          >
+            30 days
+          </button>
+          <button 
+            className={`timeframe-btn ${timeframe === 60 ? 'active' : ''}`} 
+            onClick={() => setTimeframe(60)}
+          >
+            60 days
+          </button>
+          <button 
+            className={`timeframe-btn ${timeframe === 90 ? 'active' : ''}`} 
+            onClick={() => setTimeframe(90)}
+          >
+            90 days
+          </button>
         </div>
       </div>
+
+      <PMCChart 
+        pmcData={pmcData.metrics} 
+        workoutsData={workoutsData} 
+        timeframe={timeframe} 
+        setTimeframe={setTimeframe}
+      />
     </div>
   );
 }

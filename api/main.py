@@ -1164,9 +1164,15 @@ class PMCMetricData(BaseModel):
     atl: float
     tsb: float
 
+class PMCMetadata(BaseModel):
+    last_updated: str
+    data_source: str
+    record_count: int
+
 class PMCResponse(BaseModel):
     metrics: List[PMCMetricData]
     summary: Dict[str, float]  # Latest CTL, ATL, TSB values
+    metadata: PMCMetadata
 
 @app.get("/api/health/trends", response_model=HealthTrendData)
 def get_health_trends(
@@ -1639,7 +1645,8 @@ def get_pmc_metrics(
     athlete_id: str = Query(..., description="Athlete UUID or name"),
     start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
     end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
-    days: int = Query(30, description="Number of days to analyze (if start_date/end_date not provided)")
+    days: int = Query(30, description="Number of days to analyze (if start_date/end_date not provided)"),
+    timeframe: Optional[int] = Query(None, description="Timeframe in days (7, 14, 30, 60, 90)")
 ):
     """Get Performance Management Chart (PMC) metrics including CTL, ATL, and TSB."""
     try:
@@ -1649,12 +1656,58 @@ def get_pmc_metrics(
         if start_date and end_date:
             start = date.fromisoformat(start_date)
             end = date.fromisoformat(end_date)
+        elif timeframe:
+            # Use timeframe parameter if provided
+            end = date.today()
+            start = end - timedelta(days=timeframe)
         else:
             end = date.today()
             start = end - timedelta(days=days)
         
+        logger.info(f"PMC request for athlete {athlete_id} from {start} to {end} (timeframe: {timeframe or days} days)")
+        
         # Get PMC data from database
         pmc_data = pmc_metrics.get_pmc_data(athlete_id, start, end)
+        
+        # If we don't have data for all dates in the range, calculate missing dates
+        if len(pmc_data) < (end - start).days + 1:
+            logger.info(f"Calculating PMC metrics for missing dates between {start} and {end}")
+            
+            # Calculate metrics for each date in the range
+            calculated_metrics = []
+            current_date = start
+            while current_date <= end:
+                # Check if we already have data for this date
+                existing_data = next((d for d in pmc_data if d['date'] == current_date.isoformat()), None)
+                
+                if existing_data:
+                    calculated_metrics.append(existing_data)
+                else:
+                    # Calculate metrics for this date
+                    try:
+                        daily_metrics = pmc_metrics.calculate_daily_metrics(athlete_id, current_date)
+                        pmc_metrics.save_daily_metrics(athlete_id, current_date, daily_metrics)
+                        
+                        calculated_metrics.append({
+                            'date': current_date.isoformat(),
+                            'ctl': daily_metrics['ctl'],
+                            'atl': daily_metrics['atl'],
+                            'tsb': daily_metrics['tsb']
+                        })
+                        logger.info(f"Calculated PMC metrics for {current_date}: CTL={daily_metrics['ctl']}, ATL={daily_metrics['atl']}, TSB={daily_metrics['tsb']}")
+                    except Exception as e:
+                        logger.warning(f"Failed to calculate PMC metrics for {current_date}: {str(e)}")
+                        # Add placeholder data to maintain chart continuity
+                        calculated_metrics.append({
+                            'date': current_date.isoformat(),
+                            'ctl': 0.0,
+                            'atl': 0.0,
+                            'tsb': 0.0
+                        })
+                
+                current_date += timedelta(days=1)
+            
+            pmc_data = calculated_metrics
         
         # Convert to Pydantic models
         metrics = []
@@ -1666,15 +1719,32 @@ def get_pmc_metrics(
                 tsb=data['tsb']
             ))
         
-        # Calculate summary (latest values)
+        # Calculate summary (current/today's values)
         summary = {}
         if metrics:
-            latest = metrics[-1]
-            summary = {
-                'ctl': latest.ctl,
-                'atl': latest.atl,
-                'tsb': latest.tsb
-            }
+            # Find today's metrics or calculate them if not available
+            today = date.today().isoformat()
+            today_metrics = next((m for m in metrics if m.date == today), None)
+            
+            if today_metrics:
+                # Use today's actual metrics
+                summary = {
+                    'ctl': today_metrics.ctl,
+                    'atl': today_metrics.atl,
+                    'tsb': today_metrics.tsb
+                }
+                logger.info(f"Using today's metrics for summary: CTL={today_metrics.ctl}, ATL={today_metrics.atl}, TSB={today_metrics.tsb}")
+            else:
+                # Calculate today's metrics if not in the data
+                today_calculated = pmc_metrics.calculate_daily_metrics(athlete_id, date.today())
+                pmc_metrics.save_daily_metrics(athlete_id, date.today(), today_calculated)
+                
+                summary = {
+                    'ctl': today_calculated['ctl'],
+                    'atl': today_calculated['atl'],
+                    'tsb': today_calculated['tsb']
+                }
+                logger.info(f"Calculated today's metrics for summary: CTL={today_calculated['ctl']}, ATL={today_calculated['atl']}, TSB={today_calculated['tsb']}")
         else:
             # If no data, calculate for today
             today_metrics = pmc_metrics.calculate_daily_metrics(athlete_id, date.today())
@@ -1694,9 +1764,16 @@ def get_pmc_metrics(
                 tsb=today_metrics['tsb']
             ))
         
+        logger.info(f"Returning {len(metrics)} PMC metrics for athlete {athlete_id}")
+        
         return PMCResponse(
             metrics=metrics,
-            summary=summary
+            summary=summary,
+            metadata=PMCMetadata(
+                last_updated=datetime.now().isoformat(),
+                data_source="database",
+                record_count=len(metrics)
+            )
         )
         
     except Exception as e:
