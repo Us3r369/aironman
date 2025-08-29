@@ -37,31 +37,13 @@
 - **42-Day Historical Data**: Pull comprehensive historical data for analysis
 - **Real-time Updates**: Keep your data current with background sync
 
-### 🌟 **Why It's Cool**
-
-**🎯 Training Intelligence**
-- **Data-Driven Insights**: Make informed training decisions based on your actual data
-- **Recovery Monitoring**: Track your readiness to train with HRV and sleep analysis
-- **Zone-Based Training**: Ensure you're training at the right intensities
-- **Historical Analysis**: See your progress over time with week-by-week navigation
-
-**🔄 Seamless Integration**
-- **Garmin Ecosystem**: Works with your existing Garmin devices and data
-- **No Manual Entry**: Automatic data sync eliminates manual tracking
-- **Comprehensive Coverage**: Tracks all aspects of triathlon training
-
-**📱 Modern Interface**
-- **Responsive Design**: Works on desktop and mobile devices
-- **Intuitive Navigation**: Easy-to-use interface with clear data visualization
-- **Real-time Updates**: See your data update as you train
-
-### 🔮 **What's Next on the Horizon**
-
 **📈 Performance Management Chart (PMC)**
 - Chronic Training Load (CTL) calculation and visualization
 - Acute Training Load (ATL) tracking
 - Training Stress Balance (TSB) for readiness assessment
 - Performance trend analysis over time
+
+### 🔮 **What's Next on the Horizon**
 
 **🤖 AI-Powered Insights**
 - Training recommendations based on your data
